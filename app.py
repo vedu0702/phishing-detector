@@ -9,11 +9,18 @@ st.set_page_config(page_title="CyberShield AI v2.0", page_icon="🛡️", layout
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
+    
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stAppDeployButton {display:none;}
+    
     h1 { color: #00ffcc; text-align: center; font-family: 'Courier New', monospace; font-weight: bold; }
     .stButton>button { background-color: #00ffcc; color: black; font-weight: bold; width: 100%; border-radius: 8px; height: 50px; font-size: 18px; border: none; }
     .stButton>button:hover { background-color: #00ccaa; color: black; box-shadow: 0px 0px 15px #00ffcc; }
     </style>
     """, unsafe_allow_html=True)
+
 
 st.title("🛡️ CyberShield AI: Advanced Threat Scanner")
 st.write("<p style='text-align: center; color: #888b94;'>Next-Gen Machine Learning Driven URL Vulnerability Mapping</p>", unsafe_allow_html=True)
