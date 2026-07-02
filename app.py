@@ -1,7 +1,6 @@
 import streamlit as st
 import re
 from urllib.parse import urlparse
-import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 
 # 1. Premium Cybersecurity Theme Setup
@@ -26,9 +25,8 @@ user_url = st.text_input("🔗 Paste the suspicious URL / Link below:", placehol
 if st.button("⚡ ANALYZE THREAT LEVEL"):
     if user_url:
         with st.spinner("Executing heuristics-based deep packet and structural integrity analysis..."):
-            import time; time.sleep(1.8) # Premium simulation feel
+            import time; time.sleep(1.5) # Simulation feel
             
-            # Internal rules for live demo execution
             is_phishing = False
             risk_score = 12 # Default safe base score
             reasons = []
@@ -59,59 +57,46 @@ if st.button("⚡ ANALYZE THREAT LEVEL"):
             # 3. OUTPUT DASHBOARD GENERATION
             st.write("### 📊 Live Threat Assessment Dashboard")
             
-            # Create two columns for visuals
-            col1, col2 = st.columns(2)
+            # Big Bold Metrics
+            col_m1, col_m2 = st.columns(2)
+            if is_phishing:
+                col_m1.metric(label="🚨 THREAT LEVEL", value=f"{risk_score}%", delta="HIGH RISK", delta_color="inverse")
+                col_m2.metric(label="🛡️ SAFETY INDEX", value=f"{safety_score}%", delta="CRITICAL STATUS", delta_color="inverse")
+            else:
+                col_m1.metric(label="🚨 THREAT LEVEL", value=f"{risk_score}%", delta="LOW RISK")
+                col_m2.metric(label="🛡️ SAFETY INDEX", value=f"{safety_score}%", delta="SECURE")
             
-            with col1:
-                # CYBER GAUGE METER (Fixed & Verified)
-                fig_gauge = go.Figure(go.Indicator(
-                    mode = "gauge+number",
-                    value = risk_score,
-                    title = {'text': "Threat Index %", 'font': {'color': "#ffffff", 'size': 14}},
-                    gauge = {
-                        'axis': {'range':, 'tickwidth': 1, 'tickcolor': "white"},
-                        'bar': {'color': "#ff3333" if is_phishing else "#00ffcc"},
-                        'bgcolor': "#1e222b",
-                        'borderwidth': 2,
-                        'bordercolor': "#444",
-                        'steps': [
-                            {'range':, 'color': 'rgba(0, 255, 200, 0.1)'},
-                            {'range':, 'color': 'rgba(255, 165, 0, 0.1)'},
-                            {'range':, 'color': 'rgba(255, 51, 51, 0.1)'}
-                        ],
-                    }
-                ))
-                fig_gauge.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, height=250, margin=dict(l=20,r=20,t=40,b=20))
-                st.plotly_chart(fig_gauge, use_container_width=True)
-
-            with col2:
-                # ANALYTICS PIE CHART (Fixed & Verified)
-                labels = ['Safety Index', 'Risk Factor']
-                sizes = [safety_score, risk_score]
-                colors = ['#00ffcc', '#ff3333'] if not is_phishing else ['#22443d', '#ff3333']
-                
-                fig_pie, ax = plt.subplots(figsize=(3, 3))
-                fig_pie.patch.set_facecolor('#0e1117')
-                ax.set_facecolor('#0e1117')
-                
-                wedges, texts, autotexts = ax.pie(
-                    sizes, labels=labels, colors=colors, autopct='%1.0f%%',
-                    startangle=90, textprops=dict(color="w", size=8),
-                    wedgeprops=dict(width=0.4, edgecolor='#1e222b')
-                )
-                plt.setp(autotexts, size=8, weight="bold")
-                ax.axis('equal')
-                st.pyplot(fig_pie)
+            st.write("---")
+            
+            # Visual Analytics Section
+            st.write("#### 📈 Distribution Chart")
+            labels = ['Safety Index', 'Risk Factor']
+            sizes = [safety_score, risk_score]
+            colors = ['#00ffcc', '#ff3333'] if not is_phishing else ['#1a3a34', '#ff3333']
+            
+            fig_pie, ax = plt.subplots(figsize=(6, 2.5))
+            fig_pie.patch.set_facecolor('#0e1117')
+            ax.set_facecolor('#0e1117')
+            
+            # Simple Clean Donut Chart
+            wedges, texts, autotexts = ax.pie(
+                sizes, labels=labels, colors=colors, autopct='%1.0f%%',
+                startangle=90, textprops=dict(color="w", size=10),
+                wedgeprops=dict(width=0.4, edgecolor='#1e222b')
+            )
+            plt.setp(autotexts, size=10, weight="bold")
+            ax.axis('equal')
+            st.pyplot(fig_pie)
 
             # 4. FINAL VERDICT DISPLAY
             st.write("---")
             if is_phishing:
-                st.error(f"🚨 ALERT: HIGH RISK FRAUDULENT PATTERN IDENTIFIED ({risk_score}% Threat)")
+                st.error(f"🚨 ALERT: HIGH RISK FRAUDULENT PATTERN IDENTIFIED")
                 for r in reasons:
                     st.warning(r)
                 st.info("🛑 **System Verdict:** This link mirrors architecture patterns used in dynamic credentials harvest networks. Do not browse.")
             else:
-                st.success(f"✅ VERDICT: URL STRUCTURE PASSES SECURITY FILTERS ({safety_score}% Safe)")
+                st.success(f"✅ VERDICT: URL STRUCTURE PASSES SECURITY FILTERS")
                 st.info("✔ **System Verdict:** No anomalies found in syntax length, character distribution, or hostname cryptography tokens.")
     else:
         st.info("Please insert a live network link to feed the detection pipeline.")
