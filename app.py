@@ -63,12 +63,12 @@ if st.button("⚡ ANALYZE THREAT LEVEL"):
             col1, col2 = st.columns(2)
             
             with col1:
-                # CYBER GAUGE METER (Plotly)
+                # CYBER GAUGE METER (Plotly Fix)
                 fig_gauge = go.Figure(go.Indicator(
                     mode = "gauge+number",
                     value = risk_score,
                     domain = {'x':, 'y': [0, 1]},
-                    title = {'text': "Threat Threat Index %", 'font': {'color': "#ffffff", 'size': 14}},
+                    title = {'text': "Threat Index %", 'font': {'color': "#ffffff", 'size': 14}},
                     gauge = {
                         'axis': {'range':, 'tickwidth': 1, 'tickcolor': "white"},
                         'bar': {'color': "#ff3333" if is_phishing else "#00ffcc"},
@@ -86,7 +86,7 @@ if st.button("⚡ ANALYZE THREAT LEVEL"):
                 st.plotly_chart(fig_gauge, use_container_width=True)
 
             with col2:
-                # ANALYTICS PIE CHART (Matplotlib)
+                # ANALYTICS PIE CHART (Matplotlib Fix)
                 labels = ['Safety Index', 'Risk Factor']
                 sizes = [safety_score, risk_score]
                 colors = ['#00ffcc', '#ff3333'] if not is_phishing else ['#22443d', '#ff3333']
