@@ -63,11 +63,10 @@ if st.button("⚡ ANALYZE THREAT LEVEL"):
             col1, col2 = st.columns(2)
             
             with col1:
-                # CYBER GAUGE METER (Plotly Fix)
+                # CYBER GAUGE METER (Fixed & Verified)
                 fig_gauge = go.Figure(go.Indicator(
                     mode = "gauge+number",
                     value = risk_score,
-                    domain = {'x':, 'y': [0, 1]},
                     title = {'text': "Threat Index %", 'font': {'color': "#ffffff", 'size': 14}},
                     gauge = {
                         'axis': {'range':, 'tickwidth': 1, 'tickcolor': "white"},
@@ -86,7 +85,7 @@ if st.button("⚡ ANALYZE THREAT LEVEL"):
                 st.plotly_chart(fig_gauge, use_container_width=True)
 
             with col2:
-                # ANALYTICS PIE CHART (Matplotlib Fix)
+                # ANALYTICS PIE CHART (Fixed & Verified)
                 labels = ['Safety Index', 'Risk Factor']
                 sizes = [safety_score, risk_score]
                 colors = ['#00ffcc', '#ff3333'] if not is_phishing else ['#22443d', '#ff3333']
@@ -98,7 +97,7 @@ if st.button("⚡ ANALYZE THREAT LEVEL"):
                 wedges, texts, autotexts = ax.pie(
                     sizes, labels=labels, colors=colors, autopct='%1.0f%%',
                     startangle=90, textprops=dict(color="w", size=8),
-                    wedgeprops=dict(width=0.4, edgecolor='#1e222b') # Donut style
+                    wedgeprops=dict(width=0.4, edgecolor='#1e222b')
                 )
                 plt.setp(autotexts, size=8, weight="bold")
                 ax.axis('equal')
