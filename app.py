@@ -168,7 +168,7 @@ if st.button("🔍 SCAN WEBSITE NOW"):
                 st.write(f"📝 **Global Blacklist Tracker:** :{'red[MALICIOUS RECORDS MATCH]' if has_scam_history else 'green[NO THREAT REPORT FOUND]'}")
 
             st.write("---")
-            st.write("#### 🧠 Technical Machine Learning Logging Data (For Sir's Auditing):")
+            st.write("#### 🧠 Technical Machine Learning Logging Data:")
             st.info(f"**Extracted Live Feature Vector Sequence:** {feature_weights}")
             st.markdown(f"""
             - **Random Forest Base Confidence Core:** `{round(ml_phish_probability*100, 1)}% Structural Deviation Weight`
