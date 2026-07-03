@@ -3,10 +3,10 @@ from sklearn.ensemble import RandomForestClassifier
 import pickle
 
 def train_and_save_model():
-    # Real Balanced Training Dataset (Isme chote patterns ko bhi phishing sikhaya hai)
-    # columns: [length, has_at, subdomains, has_dash, has_keyword, result]
-    raw_data = [, # Safe Google, # Safe Wiki, # Safe Apple, # Phishing long, # Phishing long, # Phishing short like shekarius.xyz, # Phishing marketplace-124, # Phishing xyz, # Phishing long
-        [32, 0, 0, 0, 0, 1]  # Safe long path
+    # 100% Valid Dataset Matrix (Har row me exactly 6 integers hain)
+    # Features: [length, has_at, subdomains, has_dash, has_keyword, result]
+    raw_data = [,  # Google (Safe),  # Wikipedia (Safe),  # Apple (Safe),  # Microsoft (Safe),  # Long Phishing Link (Unsafe),  # Fake Banking Portal (Unsafe),  # shekarius.xyz style short phishing (Unsafe),  # marketplace-124 style hosting phishing (Unsafe),  # Short xyz fraud string (Unsafe)
+        [90, 1, 4, 1, 1, 0]   # Random script attack (Unsafe)
     ]
     
     columns = ['length', 'has_at', 'subdomains', 'has_dash', 'has_keyword', 'result']
@@ -15,11 +15,11 @@ def train_and_save_model():
     X = data.drop(columns=['result'])
     y = data['result']
     
-    # Train Random Forest Classifier
+    # Train model using standard machine learning pipeline
     model = RandomForestClassifier(n_estimators=50, random_state=42)
     model.fit(X, y)
     
-    # Save model
+    # Save model weights securely
     with open("phishing_model.pkl", "wb") as f:
         pickle.dump(model, f)
 
