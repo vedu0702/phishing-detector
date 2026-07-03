@@ -73,73 +73,107 @@ def resolve_live_dns_ip(hostname):
         return "0.0.0.0", "🔴 Inactive / Blocked Server"
 
 def resolve_geolocation(ip_address):
-    """Live IP geolocation via ip-api.com (free, no key required)"""
+    """Live IP geolocation via ipapi.co — pure HTTPS, works reliably on Streamlit Community Cloud"""
     if ip_address == "0.0.0.0":
         return None
     try:
-        resp = requests.get(f"http://ip-api.com/json/{ip_address}", timeout=4.0)
+        resp = requests.get(f"https://ipapi.co/{ip_address}/json/", timeout=5.0,
+                             headers={"User-Agent": "threat-x-global-guard"})
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("status") == "success":
+            if not data.get("error"):
                 return {
-                    "country": data.get("country", "Unknown"),
-                    "region": data.get("regionName", "Unknown"),
+                    "country": data.get("country_name", "Unknown"),
+                    "region": data.get("region", "Unknown"),
                     "city": data.get("city", "Unknown"),
-                    "isp": data.get("isp", "Unknown"),
+                    "isp": data.get("org", "Unknown"),
                     "org": data.get("org", "Unknown"),
-                    "lat": data.get("lat"),
-                    "lon": data.get("lon"),
+                    "lat": data.get("latitude"),
+                    "lon": data.get("longitude"),
                     "timezone": data.get("timezone", "Unknown")
                 }
     except Exception:
         pass
     return None
 
-# 4b. Live WHOIS Domain Registration Lookup (no key required)
-def resolve_whois_record(hostname):
-    """Live WHOIS lookup — registrar, creation/expiry dates, name servers"""
+# 4b. Live Domain Registration Lookup via RDAP (no key, pure HTTPS — no raw sockets)
+def _base_domain_candidates(hostname):
+    """Build fallback candidates: full host, then progressively shorter base domains"""
+    parts = hostname.split('.')
+    candidates = [hostname]
+    if len(parts) > 2:
+        candidates.append('.'.join(parts[-2:]))
+    return candidates
+
+def _parse_rdap_date(value):
+    if not value:
+        return None
     try:
-        import whois  # python-whois package
-        w = whois.whois(hostname)
-
-        def first(value):
-            if isinstance(value, list):
-                return value[0] if value else None
-            return value
-
-        created = first(w.creation_date)
-        expires = first(w.expiration_date)
-        updated = first(w.updated_date)
-
-        age_days = None
-        if isinstance(created, datetime.datetime):
-            age_days = (datetime.datetime.utcnow() - created.replace(tzinfo=None)).days
-
-        if age_days is None:
-            age_status = "⚪ Registration date unavailable"
-        elif age_days < 30:
-            age_status = f"🔴 Very new domain — registered {age_days} days ago (common phishing trait)"
-        elif age_days < 180:
-            age_status = f"🟠 Recently registered — {age_days} days ago"
-        else:
-            age_status = f"🟢 Established domain — {age_days} days old"
-
-        return {
-            "found": True,
-            "registrar": w.registrar or "Unknown",
-            "creation_date": str(created) if created else "Unknown",
-            "expiration_date": str(expires) if expires else "Unknown",
-            "updated_date": str(updated) if updated else "Unknown",
-            "name_servers": w.name_servers if w.name_servers else [],
-            "org": getattr(w, "org", None) or "Not disclosed",
-            "country": getattr(w, "country", None) or "Not disclosed",
-            "age_days": age_days,
-            "age_status": age_status
-        }
-    except ImportError:
-        return {"found": False, "error": "python-whois not installed (pip install python-whois)"}
+        return datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
     except Exception:
-        return {"found": False, "error": "WHOIS lookup failed — record may be privacy-protected or registry unreachable"}
+        return None
+
+def resolve_whois_record(hostname):
+    """
+    Live domain registration lookup via RDAP (rdap.org bootstrap service).
+    RDAP is the IETF-standardized, HTTPS-based successor to the WHOIS protocol —
+    unlike classic WHOIS (raw TCP port 43), it works through any standard HTTPS
+    egress, making it reliable on hosted platforms like Streamlit Community Cloud.
+    """
+    for candidate in _base_domain_candidates(hostname):
+        try:
+            resp = requests.get(f"https://rdap.org/domain/{candidate}", timeout=6,
+                                 headers={"Accept": "application/rdap+json"})
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+
+            events = {e.get("eventAction"): e.get("eventDate") for e in data.get("events", [])}
+            created = _parse_rdap_date(events.get("registration"))
+            expires = _parse_rdap_date(events.get("expiration"))
+            updated = _parse_rdap_date(events.get("last changed") or events.get("last update of RDAP database"))
+
+            registrar = "Unknown"
+            for entity in data.get("entities", []):
+                if "registrar" in entity.get("roles", []):
+                    vcard = entity.get("vcardArray")
+                    if vcard and len(vcard) > 1:
+                        for field in vcard[1]:
+                            if field[0] == "fn":
+                                registrar = field[3]
+                                break
+
+            name_servers = [ns.get("ldhName") for ns in data.get("nameservers", []) if ns.get("ldhName")]
+
+            age_days = None
+            if created:
+                age_days = (datetime.datetime.now(datetime.timezone.utc) - created).days
+
+            if age_days is None:
+                age_status = "⚪ Registration date unavailable"
+            elif age_days < 30:
+                age_status = f"🔴 Very new domain — registered {age_days} days ago (common phishing trait)"
+            elif age_days < 180:
+                age_status = f"🟠 Recently registered — {age_days} days ago"
+            else:
+                age_status = f"🟢 Established domain — {age_days} days old"
+
+            return {
+                "found": True,
+                "registrar": registrar,
+                "creation_date": str(created) if created else "Unknown",
+                "expiration_date": str(expires) if expires else "Unknown",
+                "updated_date": str(updated) if updated else "Unknown",
+                "name_servers": name_servers,
+                "org": registrar,
+                "country": data.get("country", "Not disclosed"),
+                "age_days": age_days,
+                "age_status": age_status
+            }
+        except Exception:
+            continue
+
+    return {"found": False, "error": "No RDAP record found — domain may be unregistered, or registry unreachable"}
 
 # 5. Core Lexical Calculation & Extended Heuristics Engine
 def extract_lexical_vectors(url):
