@@ -64,13 +64,6 @@ def check_past_phishing_history(target_url):
     except:
         pass
 
-    # Advanced Hard Block to catch custom lookalikes assigned by your coach
-    sir_links = ['goog1e', 'faceb00k', 'netfliix', 'shekarius', 'marketplace-124', 'allegromt', 'secure-paypal', 'amazon-order', 'onlinesbi', 'flipkart-promo']
-    if any(sig in target_url.lower() for sig in sir_links):
-        return True, "Flagged by System Database (Historical abuse pattern match)"
-
-    return False, "Clean record: No malicious history reports found inside global threat feeds."
-
 # 4. Live DNS Host Resolver
 def resolve_live_dns_ip(hostname):
     try:
