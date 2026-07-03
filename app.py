@@ -4,6 +4,7 @@ import math
 import socket
 import requests
 import re
+import datetime
 import matplotlib.pyplot as plt
 from urllib.parse import urlparse
 from sklearn.ensemble import RandomForestClassifier
@@ -62,7 +63,7 @@ def check_past_phishing_history(target_url):
         pass
     return False, "Clean record: No active historical threats listed inside open intelligence repositories."
 
-# 4. Live DNS Host Resolver
+# 4. Live DNS Host Resolver + IP Geolocation
 def resolve_live_dns_ip(hostname):
     try:
         if ":" in hostname:
@@ -70,6 +71,75 @@ def resolve_live_dns_ip(hostname):
         return socket.gethostbyname(hostname), "🟢 Live & Verified"
     except Exception:
         return "0.0.0.0", "🔴 Inactive / Blocked Server"
+
+def resolve_geolocation(ip_address):
+    """Live IP geolocation via ip-api.com (free, no key required)"""
+    if ip_address == "0.0.0.0":
+        return None
+    try:
+        resp = requests.get(f"http://ip-api.com/json/{ip_address}", timeout=4.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("status") == "success":
+                return {
+                    "country": data.get("country", "Unknown"),
+                    "region": data.get("regionName", "Unknown"),
+                    "city": data.get("city", "Unknown"),
+                    "isp": data.get("isp", "Unknown"),
+                    "org": data.get("org", "Unknown"),
+                    "lat": data.get("lat"),
+                    "lon": data.get("lon"),
+                    "timezone": data.get("timezone", "Unknown")
+                }
+    except Exception:
+        pass
+    return None
+
+# 4b. Live WHOIS Domain Registration Lookup (no key required)
+def resolve_whois_record(hostname):
+    """Live WHOIS lookup — registrar, creation/expiry dates, name servers"""
+    try:
+        import whois  # python-whois package
+        w = whois.whois(hostname)
+
+        def first(value):
+            if isinstance(value, list):
+                return value[0] if value else None
+            return value
+
+        created = first(w.creation_date)
+        expires = first(w.expiration_date)
+        updated = first(w.updated_date)
+
+        age_days = None
+        if isinstance(created, datetime.datetime):
+            age_days = (datetime.datetime.utcnow() - created.replace(tzinfo=None)).days
+
+        if age_days is None:
+            age_status = "⚪ Registration date unavailable"
+        elif age_days < 30:
+            age_status = f"🔴 Very new domain — registered {age_days} days ago (common phishing trait)"
+        elif age_days < 180:
+            age_status = f"🟠 Recently registered — {age_days} days ago"
+        else:
+            age_status = f"🟢 Established domain — {age_days} days old"
+
+        return {
+            "found": True,
+            "registrar": w.registrar or "Unknown",
+            "creation_date": str(created) if created else "Unknown",
+            "expiration_date": str(expires) if expires else "Unknown",
+            "updated_date": str(updated) if updated else "Unknown",
+            "name_servers": w.name_servers if w.name_servers else [],
+            "org": getattr(w, "org", None) or "Not disclosed",
+            "country": getattr(w, "country", None) or "Not disclosed",
+            "age_days": age_days,
+            "age_status": age_status
+        }
+    except ImportError:
+        return {"found": False, "error": "python-whois not installed (pip install python-whois)"}
+    except Exception:
+        return {"found": False, "error": "WHOIS lookup failed — record may be privacy-protected or registry unreachable"}
 
 # 5. Core Lexical Calculation & Extended Heuristics Engine
 def extract_lexical_vectors(url):
@@ -110,10 +180,12 @@ if st.button("🔍 SCAN WEBSITE NOW"):
     if user_target:
         working_url = user_target if user_target.startswith(('http://', 'https://')) else 'http://' + user_target
 
-        with st.spinner("Analyzing server protocols and scanning system weights..."):
+        with st.spinner("Analyzing server protocols, WHOIS records and geolocation..."):
             feature_weights, host_domain, pro_meta = extract_lexical_vectors(working_url)
             resolved_ip, dns_status_log = resolve_live_dns_ip(host_domain)
             has_scam_history, history_log_msg = check_past_phishing_history(working_url)
+            geo_info = resolve_geolocation(resolved_ip)
+            whois_info = resolve_whois_record(host_domain)
 
             eval_dataframe = pd.DataFrame([feature_weights], columns=['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token'])
             ml_probabilities = cyber_classifier.predict_proba(eval_dataframe)
@@ -128,6 +200,11 @@ if st.button("🔍 SCAN WEBSITE NOW"):
                 dynamic_risk_weight += 15.0
             if pro_meta["is_ip_masked"] == 1:
                 dynamic_risk_weight += 40.0
+            if whois_info.get("found") and whois_info.get("age_days") is not None:
+                if whois_info["age_days"] < 30:
+                    dynamic_risk_weight += 20.0
+                elif whois_info["age_days"] < 180:
+                    dynamic_risk_weight += 8.0
 
             risk_percent = round(min(99.4, max(4.2, dynamic_risk_weight)), 1)
             safety_percent = round(100.0 - risk_percent, 1)
@@ -178,6 +255,45 @@ if st.button("🔍 SCAN WEBSITE NOW"):
         with l_col2:
             st.write(f"🧠 **AI Prediction Output:** :{'red[SUSPICIOUS ACTIVITY MATCH]' if is_malicious_class else 'green[LEGITIMATE WEBSITE SIGNATURE]'}")
             st.write(f"📝 **Global Blacklist Tracker:** :{'red[MALICIOUS RECORDS MATCH]' if has_scam_history else 'green[NO THREAT REPORT FOUND]'}")
+
+        st.write("---")
+
+        # PRO FEATURE: Live IP Geolocation
+        st.write("#### 🗺️ Live Server Geolocation:")
+        if geo_info:
+            g_col1, g_col2 = st.columns(2)
+            with g_col1:
+                st.write(f"🌍 **Country:** {geo_info['country']}")
+                st.write(f"🏙️ **City / Region:** {geo_info['city']}, {geo_info['region']}")
+                st.write(f"🕒 **Timezone:** {geo_info['timezone']}")
+            with g_col2:
+                st.write(f"📡 **ISP:** {geo_info['isp']}")
+                st.write(f"🏢 **Organization:** {geo_info['org']}")
+                if geo_info['lat'] is not None and geo_info['lon'] is not None:
+                    st.write(f"📍 **Coordinates:** {geo_info['lat']}, {geo_info['lon']}")
+                    st.map(pd.DataFrame({"lat": [geo_info['lat']], "lon": [geo_info['lon']]}))
+        else:
+            st.write("⚪ Geolocation unavailable — server unresolvable or lookup failed.")
+
+        st.write("---")
+
+        # PRO FEATURE: Full WHOIS registration history
+        st.write("#### 📜 Full WHOIS Registration History:")
+        if whois_info.get("found"):
+            st.write(f"📅 **Domain Age Assessment:** {whois_info['age_status']}")
+            w_col1, w_col2 = st.columns(2)
+            with w_col1:
+                st.write(f"🏛️ **Registrar:** {whois_info['registrar']}")
+                st.write(f"🆕 **Creation Date:** {whois_info['creation_date']}")
+                st.write(f"⏳ **Expiration Date:** {whois_info['expiration_date']}")
+            with w_col2:
+                st.write(f"🔄 **Last Updated:** {whois_info['updated_date']}")
+                st.write(f"🏢 **Registrant Org:** {whois_info['org']}")
+                st.write(f"🌐 **Registrant Country:** {whois_info['country']}")
+            if whois_info['name_servers']:
+                st.write(f"🖥️ **Name Servers:** {', '.join(whois_info['name_servers'][:4])}")
+        else:
+            st.write(f"⚪ {whois_info.get('error', 'WHOIS data unavailable')}")
 
         st.write("---")
 
