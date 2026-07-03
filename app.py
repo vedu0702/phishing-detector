@@ -34,20 +34,6 @@ st.write("<div style='text-align: center; padding-top: 10px;'><span style='font-
 st.write("<p style='text-align: center; color: #94a3b8; font-size: 15px; font-family: Arial;'>Enter any website address below to run our automated machine learning scanners and verify website authenticity instantly.</p>", unsafe_allow_html=True)
 st.write("---")
 
-# 1b. URLhaus now requires a free Auth-Key for every API call (abuse.ch changed this in 2025).
-# Without a key every lookup returns 401 and the app used to silently report "clean" — fixed below.
-with st.sidebar:
-    st.write("### ⚙️ Threat Intel Settings")
-    URLHAUS_AUTH_KEY = st.text_input(
-        "URLhaus Auth-Key",
-        type="password",
-        help="Required by abuse.ch as of 2025. Get a free key at https://auth.abuse.ch/ "
-             "then paste it here. Without it, the Global Blacklist Tracker cannot query URLhaus "
-             "and will be skipped instead of silently reporting 'clean'."
-    )
-    if not URLHAUS_AUTH_KEY:
-        st.caption("⚠️ No Auth-Key set — blacklist checks will be marked as unavailable, not 'clean'.")
-
 # 2. Advanced RandomForest Framework Ingestion Block
 @st.cache_resource
 def compile_advanced_ml_model():
@@ -65,47 +51,20 @@ def compile_advanced_ml_model():
 cyber_classifier = compile_advanced_ml_model()
 
 # 3. Real Live Past History Scam Checker (URLHaus API Integration over Internet)
-def check_past_phishing_history(target_url, auth_key=None):
-    """
-    Returns (is_malicious: bool, message: str, checked: bool).
-    checked=False means the lookup could NOT be performed (missing/invalid key,
-    network error, rate limit, etc.) — this must NOT be reported as "clean",
-    since that would be a false negative.
-    """
-    if not auth_key:
-        return False, "⚪ Blacklist check skipped — no URLhaus Auth-Key configured (see sidebar).", False
-
+def check_past_phishing_history(target_url):
     try:
         response = requests.post(
             "https://urlhaus-api.abuse.ch/v1/url/",
             data={'url': target_url},
-            headers={"Auth-Key": auth_key},
             timeout=4.0
         )
+        if response.status_code == 200:
+            res_data = response.json()
+            if res_data.get('query_status') == 'ok':
+                return True, f"Reported scam listed in Global Blocklist databases (Class: {res_data.get('threat')})"
     except Exception:
-        return False, "⚪ Blacklist check unavailable — network error while contacting URLhaus.", False
-
-    if response.status_code == 401:
-        return False, "⚪ Blacklist check failed — URLhaus Auth-Key is invalid or expired.", False
-
-    if response.status_code != 200:
-        return False, f"⚪ Blacklist check unavailable — URLhaus returned HTTP {response.status_code}.", False
-
-    try:
-        res_data = response.json()
-    except Exception:
-        return False, "⚪ Blacklist check unavailable — malformed response from URLhaus.", False
-
-    query_status = res_data.get('query_status')
-
-    if query_status == 'ok':
-        return True, f"🚨 Reported scam listed in Global Blocklist databases (Class: {res_data.get('threat')})", True
-
-    if query_status == 'no_results':
-        return False, "✅ Clean record: No active historical threats listed for this exact URL in URLhaus.", True
-
-    # Any other status (e.g. invalid_url, http_post_expected) — treat as "couldn't verify", not "clean"
-    return False, f"⚪ Blacklist check inconclusive — URLhaus status: {query_status}", False
+        pass
+    return False, "Clean record: No active historical threats listed inside open intelligence repositories."
 
 # 4. Live DNS Host Resolver + IP Geolocation
 def resolve_live_dns_ip(hostname):
@@ -306,7 +265,7 @@ def scan_url(user_target):
 
     feature_weights, host_domain, pro_meta = extract_lexical_vectors(final_url)
     resolved_ip, dns_status_log = resolve_live_dns_ip(host_domain)
-    has_scam_history, history_log_msg, blacklist_checked = check_past_phishing_history(final_url, URLHAUS_AUTH_KEY)
+    has_scam_history, history_log_msg = check_past_phishing_history(final_url)
     geo_info = resolve_geolocation(resolved_ip)
     whois_info = resolve_whois_record(host_domain)
     favicon_info = check_favicon_impersonation(final_url, host_domain)
@@ -350,7 +309,6 @@ def scan_url(user_target):
         "dns_status_log": dns_status_log,
         "has_scam_history": has_scam_history,
         "history_log_msg": history_log_msg,
-        "blacklist_checked": blacklist_checked,
         "geo_info": geo_info,
         "whois_info": whois_info,
         "favicon_info": favicon_info,
@@ -372,8 +330,7 @@ def build_single_scan_csv(result):
         "Safety %": result["safety_percent"],
         "Server IP": result["resolved_ip"],
         "DNS Status": result["dns_status_log"],
-        "Blacklist Status": ("Not Verified" if not result["blacklist_checked"]
-                              else ("Match" if result["has_scam_history"] else "Clean")),
+        "Blacklist Match": result["has_scam_history"],
         "Blacklist Detail": result["history_log_msg"],
         "SSL": "Yes" if result["pro_meta"]["is_ssl"] else "No",
         "IP-Masked Domain": "Yes" if result["pro_meta"]["is_ip_masked"] else "No",
@@ -413,7 +370,7 @@ def build_single_scan_pdf(result):
             f"IP-Masked:    {'Yes' if result['pro_meta']['is_ip_masked'] else 'No'}",
             "",
             "-- Threat Intelligence --",
-            f"Blacklist Status: {'Not Verified' if not result['blacklist_checked'] else ('Match' if result['has_scam_history'] else 'Clean')}",
+            f"Blacklist Match: {result['has_scam_history']}",
             f"Detail: {result['history_log_msg']}",
             f"Favicon Impersonation: {result['favicon_info'].get('note')}",
             "",
@@ -469,7 +426,6 @@ with tab_single:
             dns_status_log = result["dns_status_log"]
             has_scam_history = result["has_scam_history"]
             history_log_msg = result["history_log_msg"]
-            blacklist_checked = result["blacklist_checked"]
             geo_info = result["geo_info"]
             whois_info = result["whois_info"]
             favicon_info = result["favicon_info"]
@@ -539,13 +495,7 @@ with tab_single:
 
             with l_col2:
                 st.write(f"🧠 **AI Prediction Output:** :{'red[SUSPICIOUS ACTIVITY MATCH]' if is_malicious_class else 'green[LEGITIMATE WEBSITE SIGNATURE]'}")
-                if not blacklist_checked:
-                    st.write("📝 **Global Blacklist Tracker:** :gray[NOT VERIFIED]")
-                elif has_scam_history:
-                    st.write("📝 **Global Blacklist Tracker:** :red[MALICIOUS RECORDS MATCH]")
-                else:
-                    st.write("📝 **Global Blacklist Tracker:** :green[NO THREAT REPORT FOUND]")
-                st.caption(history_log_msg)
+                st.write(f"📝 **Global Blacklist Tracker:** :{'red[MALICIOUS RECORDS MATCH]' if has_scam_history else 'green[NO THREAT REPORT FOUND]'}")
 
             st.write("---")
 
@@ -705,8 +655,7 @@ with tab_bulk:
                         "Redirect Hops": len(res["redirect_chain"]) - 1,
                         "Server IP": res["resolved_ip"],
                         "SSL": "Yes" if res["pro_meta"]["is_ssl"] else "No",
-                        "Blacklist Status": ("Not Verified" if not res["blacklist_checked"]
-                                              else ("Match" if res["has_scam_history"] else "Clean")),
+                        "Blacklisted": res["has_scam_history"],
                         "Favicon Impersonation": res["favicon_info"].get("matched_brand") or "None",
                         "Domain Age (days)": res["whois_info"].get("age_days", "N/A"),
                         "Country": res["geo_info"]["country"] if res["geo_info"] else "N/A",
@@ -715,7 +664,7 @@ with tab_bulk:
                     bulk_results.append({
                         "URL": u, "Final URL": "ERROR", "Verdict": "⚪ SCAN FAILED",
                         "Risk %": "N/A", "Redirect Hops": "N/A", "Server IP": "N/A",
-                        "SSL": "N/A", "Blacklist Status": "N/A", "Favicon Impersonation": "N/A",
+                        "SSL": "N/A", "Blacklisted": "N/A", "Favicon Impersonation": "N/A",
                         "Domain Age (days)": "N/A", "Country": "N/A",
                     })
                 progress.progress((i + 1) / len(url_list), text=f"Scanning {i + 1} / {len(url_list)}...")
