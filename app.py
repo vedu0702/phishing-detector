@@ -32,10 +32,11 @@ st.write("---")
 # 2. Advanced RandomForest Framework Ingestion Block
 @st.cache_resource
 def compile_advanced_ml_model():
+    # Target Mapping: 0 = Safe, 1 = Phishing
     training_data = [
-        [15, 0, 0, 0, 2.4, 0, 1], [18, 0, 1, 0, 2.7, 0, 1], [22, 0, 2, 0, 3.1, 0, 1], [28, 0, 0, 0, 2.9, 0, 1],
-        [32, 0, 1, 2, 4.2, 1, 0], [45, 0, 0, 2, 4.1, 1, 0], [55, 0, 1, 2, 4.3, 1, 0], [72, 1, 2, 1, 4.5, 1, 0],
-        [34, 0, 1, 2, 4.2, 1, 0], [17, 0, 1, 0, 4.4, 1, 0], [26, 0, 2, 1, 4.1, 1, 0], [38, 0, 1, 1, 4.0, 1, 0]
+        [15, 0, 0, 0, 2.4, 0, 0], [18, 0, 1, 0, 2.7, 0, 0], [22, 0, 2, 0, 3.1, 0, 0], [28, 0, 0, 0, 2.9, 0, 0],
+        [32, 0, 1, 2, 4.2, 1, 1], [45, 0, 0, 2, 4.1, 1, 1], [55, 0, 1, 2, 4.3, 1, 1], [72, 1, 2, 1, 4.5, 1, 1],
+        [34, 0, 1, 2, 4.2, 1, 1], [17, 0, 1, 0, 4.4, 1, 1], [26, 0, 2, 1, 4.1, 1, 1], [38, 0, 1, 1, 4.0, 1, 1]
     ]
     features = ['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token']
     df = pd.DataFrame(training_data, columns=features + ['result'])
@@ -60,6 +61,8 @@ def check_past_phishing_history(target_url):
 # 4. Live DNS Host Resolver
 def resolve_live_dns_ip(hostname):
     try:
+        if ":" in hostname:
+            hostname = hostname.split(":")[0]
         return socket.gethostbyname(hostname), "🟢 Live & Verified"
     except:
         return "0.0.0.0", "🔴 Inactive / Blocked Server"
@@ -70,7 +73,7 @@ def extract_lexical_vectors(url):
     length = len(clean)
     has_at = 1 if "@" in clean else 0
     parsed = urlparse(url if "://" in url else "http://" + url)
-    host = parsed.netloc if parsed.netloc else clean.split('/')
+    host = parsed.netloc if parsed.netloc else clean.split('/')[0]
     subdomains = max(0, len(host.split('.')) - 2)
     has_dash = 1 if "-" in host else 0
     
@@ -96,7 +99,9 @@ if st.button("🔍 SCAN WEBSITE NOW"):
             # Predict Probabilities
             eval_dataframe = pd.DataFrame([feature_weights], columns=['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token'])
             ml_probabilities = cyber_classifier.predict_proba(eval_dataframe)
-            ml_phish_probability = float(ml_probabilities[0][0])
+            
+            # Index [0][1] correctly targets the risk profile (Phishing class)
+            ml_phish_probability = float(ml_probabilities[0][1])
             
             dynamic_risk_weight = ml_phish_probability * 100.0
             if has_scam_history: dynamic_risk_weight += 25.0
@@ -131,7 +136,14 @@ if st.button("🔍 SCAN WEBSITE NOW"):
             fig_pie, ax = plt.subplots(figsize=(6, 2.4))
             fig_pie.patch.set_facecolor('#060814')
             ax.set_facecolor('#060814')
-            ax.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90, textprops=dict(color="w", weight="bold", size=10), wedgeprops=dict(width=0.4, edgecolor='#1e293b'))
+            
+            wedges, texts, autotexts = ax.pie(
+                sizes, labels=labels, colors=colors, autopct='%1.1f%%', 
+                startangle=90, textprops=dict(color="w", weight="bold", size=10), 
+                wedgeprops=dict(width=0.4, edgecolor='#1e293b')
+            )
+            for text in texts:
+                text.set_color('#ffffff')
             ax.axis('equal')
             st.pyplot(fig_pie)
             plt.close()
