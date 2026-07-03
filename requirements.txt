@@ -3,5 +3,3 @@ pandas
 requests
 matplotlib
 scikit-learn
-plotly
-python-whois
