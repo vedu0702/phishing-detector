@@ -6,34 +6,200 @@ import requests
 import re
 import io
 import datetime
+import time
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from urllib.parse import urlparse
 from sklearn.ensemble import RandomForestClassifier
+import plotly.graph_objects as go
 
-# 1. Premium Enterprise UI Configuration
-st.set_page_config(page_title="Threat-X Global Guard Pro", page_icon="🛡️", layout="centered")
+st.set_page_config(page_title="🛡 THREAT-X AI", page_icon="🛡️", layout="wide")
+
+custom_css = """
+:root{
+  --bg1:#0F172A;
+  --bg2:#111827;
+  --bg3:#1E293B;
+  --accent1:#00F5FF;
+  --accent2:#00E676;
+  --accent3:#7C3AED;
+  --glass:rgba(255,255,255,0.08);
+  --text:#E5EEF8;
+}
+
+.stApp{
+  background:
+    radial-gradient(900px 400px at 10% 20%, rgba(124,58,237,0.16), transparent 35%),
+    radial-gradient(700px 300px at 85% 15%, rgba(0,245,255,0.10), transparent 30%),
+    radial-gradient(700px 300px at 70% 85%, rgba(0,230,118,0.10), transparent 30%),
+    linear-gradient(120deg, var(--bg1), var(--bg2) 45%, var(--bg3));
+  background-size: 200% 200%;
+  animation: bgShift 16s ease infinite;
+  color: var(--text);
+}
+@keyframes bgShift{
+  0%{background-position:0% 0%}
+  50%{background-position:100% 100%}
+  100%{background-position:0% 0%}
+}
+header, footer {visibility:hidden;}
+#MainMenu {visibility:hidden;}
+
+.navbar{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:12px 18px; margin-top:4px; margin-bottom:18px;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.06);
+  border-radius:16px;
+  backdrop-filter: blur(15px);
+}
+.brand{
+  font-size:20px; font-weight:800; color:white; letter-spacing:0.5px;
+}
+.brand span{color:var(--accent1)}
+.navlinks{
+  color:rgba(255,255,255,0.78);
+  font-size:14px;
+}
+.hero{
+  padding:20px 22px;
+  border-radius:20px;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(15px);
+  box-shadow: 0 10px 40px rgba(0,0,0,0.24);
+  margin-bottom:16px;
+}
+.hero-title{
+  font-size:34px;
+  font-weight:900;
+  line-height:1.1;
+  color:#fff;
+}
+.hero-sub{
+  margin-top:8px;
+  color:rgba(255,255,255,0.72);
+  font-size:15px;
+}
+
+.glass-card{
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(15px);
+  border-radius:16px;
+  padding:16px;
+  box-shadow: 0 10px 32px rgba(0,0,0,0.22);
+  margin-bottom:14px;
+}
+
+.search-box{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  padding:8px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,0.10);
+  background:rgba(255,255,255,0.04);
+  box-shadow: 0 0 0 1px rgba(0,245,255,0.04), 0 0 30px rgba(0,245,255,0.07);
+}
+.search-icon{
+  padding-left:8px;
+  font-size:18px;
+  color:var(--accent1);
+}
+div[data-baseweb="input"] > div{
+  border-radius:14px !important;
+  background:rgba(255,255,255,0.02) !important;
+}
+div[data-baseweb="input"] input{
+  color:white !important;
+  font-size:16px !important;
+}
+button[kind="primary"]{
+  background:linear-gradient(90deg, var(--accent1), var(--accent2)) !important;
+  color:#06131A !important;
+  border:none !important;
+  border-radius:14px !important;
+  font-weight:800 !important;
+  box-shadow: 0 8px 30px rgba(0,245,255,0.18) !important;
+  height:48px !important;
+}
+button[kind="primary"]:hover{
+  transform: translateY(-1px);
+}
+
+.status-safe{
+  border:1px solid rgba(0,230,118,0.25);
+  box-shadow: 0 0 30px rgba(0,230,118,0.18), 0 0 60px rgba(0,230,118,0.08);
+}
+.status-danger{
+  border:1px solid rgba(255,80,80,0.25);
+  box-shadow: 0 0 30px rgba(255,80,80,0.18), 0 0 60px rgba(255,80,80,0.08);
+}
+.status-title{
+  font-size:24px;
+  font-weight:900;
+  margin-bottom:10px;
+}
+.status-grid{
+  display:grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap:12px;
+}
+.status-item{
+  padding:12px;
+  border-radius:14px;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.08);
+}
+.status-label{font-size:13px;color:rgba(255,255,255,0.65)}
+.status-value{font-size:22px;font-weight:900;color:#fff;margin-top:4px}
+
+.section-title{
+  font-size:18px;
+  font-weight:800;
+  margin:6px 0 12px 0;
+  color:#fff;
+}
+.mono{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  color:#D9E7F5;
+}
+.footer{
+  margin-top:18px;
+  padding:14px 0 6px 0;
+  color:rgba(255,255,255,0.72);
+  font-size:13px;
+  text-align:center;
+}
+.timeline{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height:1.6;
+  color:#E8F4FF;
+}
+.small-note{
+  color:rgba(255,255,255,0.68);
+  font-size:13px;
+}
+"""
+
+st.markdown(f"<style>{custom_css}</style>", unsafe_allow_html=True)
 
 st.markdown("""
-    <style>
-    .main { background-color: #060814; }
-    div.block-container { padding-top: 2rem; }
-    h1 { color: #ffffff; text-align: center; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; }
-    h3 { color: #f1f5f9; font-family: 'Helvetica Neue', Arial, sans-serif; }
-    .stButton>button { background-color: #00ffcc; color: #060814; font-weight: bold; width: 100%; border-radius: 6px; height: 52px; font-size: 18px; border: none; transition: 0.3s; box-shadow: 0px 4px 15px rgba(0, 255, 204, 0.2); }
-    .stButton>button:hover { background-color: #00ccaa; box-shadow: 0px 0px 25px #00ffcc; transform: translateY(-1px); }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stAppDeployButton {display:none;}
-    </style>
-    """, unsafe_allow_html=True)
+<div class="navbar">
+  <div class="brand">🛡 <span>THREAT-X</span></div>
+  <div class="navlinks">Home &nbsp;&nbsp; Scanner &nbsp;&nbsp; Bulk Scan &nbsp;&nbsp; About &nbsp;&nbsp; GitHub</div>
+</div>
+""", unsafe_allow_html=True)
 
-st.write("<div style='text-align: center; padding-top: 10px;'><span style='font-size: 38px; font-weight: 800; color: #ffffff; letter-spacing: 1px;'>THREAT</span><span style='font-size: 38px; font-weight: 800; color: #00ffcc; letter-spacing: 1px;'>-X</span><span style='font-size: 14px; font-weight: bold; color: #475569; margin-left: 8px;'>GLOBAL GUARD PRO v13.0</span></div>", unsafe_allow_html=True)
-st.write("<p style='text-align: center; color: #94a3b8; font-size: 15px; font-family: Arial;'>Enter any website address below to run our automated machine learning scanners and verify website authenticity instantly.</p>", unsafe_allow_html=True)
-st.write("---")
+st.markdown("""
+<div class="hero">
+  <div class="hero-title">🛡️ THREAT-X AI<br>Enterprise Phishing Detection Platform</div>
+  <div class="hero-sub">Premium website authenticity scanner with ML scoring, WHOIS, DNS, geolocation, and redirect tracing.</div>
+</div>
+""", unsafe_allow_html=True)
 
-# 2. Advanced RandomForest Framework Ingestion Block
 @st.cache_resource
 def compile_advanced_ml_model():
     training_data = [
@@ -49,7 +215,6 @@ def compile_advanced_ml_model():
 
 cyber_classifier = compile_advanced_ml_model()
 
-# 4. Live DNS Host Resolver + IP Geolocation
 def resolve_live_dns_ip(hostname):
     try:
         if ":" in hostname:
@@ -59,7 +224,6 @@ def resolve_live_dns_ip(hostname):
         return "0.0.0.0", "🔴 Inactive / Blocked Server"
 
 def resolve_geolocation(ip_address):
-    """Live IP geolocation via ip-api.com (free, no key required)"""
     if ip_address == "0.0.0.0":
         return None
     try:
@@ -81,35 +245,28 @@ def resolve_geolocation(ip_address):
         pass
     return None
 
-# 4b. Live WHOIS Domain Registration Lookup (no key required)
 def resolve_whois_record(hostname):
-    """Live WHOIS lookup — registrar, creation/expiry dates, name servers"""
     try:
-        import whois  # python-whois package
+        import whois
         w = whois.whois(hostname)
-
         def first(value):
             if isinstance(value, list):
                 return value[0] if value else None
             return value
-
         created = first(w.creation_date)
         expires = first(w.expiration_date)
         updated = first(w.updated_date)
-
         age_days = None
         if isinstance(created, datetime.datetime):
             age_days = (datetime.datetime.utcnow() - created.replace(tzinfo=None)).days
-
         if age_days is None:
             age_status = "⚪ Registration date unavailable"
         elif age_days < 30:
-            age_status = f"🔴 Very new domain — registered {age_days} days ago (common phishing trait)"
+            age_status = f"🔴 Very new domain — registered {age_days} days ago"
         elif age_days < 180:
             age_status = f"🟠 Recently registered — {age_days} days ago"
         else:
             age_status = f"🟢 Established domain — {age_days} days old"
-
         return {
             "found": True,
             "registrar": w.registrar or "Unknown",
@@ -122,24 +279,13 @@ def resolve_whois_record(hostname):
             "age_days": age_days,
             "age_status": age_status
         }
-    except ImportError:
-        return {"found": False, "error": "python-whois not installed (pip install python-whois)"}
     except Exception:
-        return {"found": False, "error": "WHOIS lookup failed — record may be privacy-protected or registry unreachable"}
+        return {"found": False, "error": "WHOIS lookup failed"}
 
-# 4c. Redirect Chain Tracer — follows shorteners/redirect hops to the real final page
 def trace_redirect_chain(url, max_hops=10):
-    """
-    Follows HTTP redirects (bit.ly, tinyurl, tracking hops, etc.) and returns
-    the full chain of URLs plus the final resolved destination URL.
-    """
     chain = [url]
     try:
-        resp = requests.get(
-            url, timeout=6.0, allow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (ThreatX-Scanner)"},
-            stream=True
-        )
+        resp = requests.get(url, timeout=6.0, allow_redirects=True, headers={"User-Agent": "Mozilla/5.0"}, stream=True)
         resp.close()
         if resp.history:
             chain = [h.url for h in resp.history] + [resp.url]
@@ -147,56 +293,41 @@ def trace_redirect_chain(url, max_hops=10):
             chain = [resp.url]
         return chain[:max_hops], chain[-1]
     except Exception:
-        # Could not follow redirects (dead link, blocked, etc.) — scan original URL as-is
         return chain, url
 
-# 5. Core Lexical Calculation & Extended Heuristics Engine
 def extract_lexical_vectors(url):
     if not url.startswith(('http://', 'https://')):
         url = 'http://' + url
-
     parsed = urlparse(url)
     host = parsed.netloc
     clean = host.lower().strip()
-
     length = len(clean)
     has_at = 1 if "@" in clean else 0
     subdomains = max(0, len(host.split('.')) - 2)
     has_dash = 1 if "-" in host else 0
-
     probs = [float(host.count(c)) / len(host) for c in set(host)] if len(host) > 0 else [0.0]
     entropy = -sum([p * math.log(p, 2) for p in probs]) if len(host) > 0 else 0.0
-
     tokens = ['login', 'verify', 'security', 'secure', 'billing', 'update', 'marketplace',
-              'goog1e', 'faceb00k', 'netfliix', 'shekarius', '124', 'allegromt',
-              'paypal', 'sbi', 'amazon', 'auth', 'portal']
+              'goog1e', 'faceb00k', 'netfliix', 'paypal', 'sbi', 'amazon', 'auth', 'portal']
     has_token = 1 if any(kw in clean for kw in tokens) and not any(
         wl in host for wl in ['google.com', 'github.com', 'wikipedia.org', 'paypal.com']
     ) else 0
-
-    # Extended pro features
     is_ssl = 1 if parsed.scheme == 'https' else 0
     is_ip_masked = 1 if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", clean.split(':')[0]) else 0
-
     features = [length, has_at, subdomains, has_dash, round(entropy, 2), has_token]
     pro_heuristics = {"is_ssl": is_ssl, "is_ip_masked": is_ip_masked}
     return features, host, pro_heuristics
 
-# 6. Unified scan pipeline — used by both Single Scan and Bulk Scan
 def scan_url(user_target):
     original_url = user_target if user_target.startswith(('http://', 'https://')) else 'http://' + user_target
-
     redirect_chain, final_url = trace_redirect_chain(original_url)
-
     feature_weights, host_domain, pro_meta = extract_lexical_vectors(final_url)
     resolved_ip, dns_status_log = resolve_live_dns_ip(host_domain)
     geo_info = resolve_geolocation(resolved_ip)
     whois_info = resolve_whois_record(host_domain)
-
     eval_dataframe = pd.DataFrame([feature_weights], columns=['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token'])
     ml_probabilities = cyber_classifier.predict_proba(eval_dataframe)
     ml_phish_probability = float(ml_probabilities[0][1])
-
     dynamic_risk_weight = ml_phish_probability * 100.0
     if resolved_ip == "0.0.0.0":
         dynamic_risk_weight += 35.0
@@ -211,11 +342,11 @@ def scan_url(user_target):
             dynamic_risk_weight += 8.0
     if len(redirect_chain) > 2:
         dynamic_risk_weight += 10.0
-
     risk_percent = round(min(99.4, max(4.2, dynamic_risk_weight)), 1)
     safety_percent = round(100.0 - risk_percent, 1)
     is_malicious_class = True if risk_percent >= 45.0 else False
-
+    confidence = round(100.0 - min(99.0, risk_percent * 0.55), 1)
+    category = "Trusted" if not is_malicious_class else "Suspicious"
     return {
         "input_url": user_target,
         "original_url": original_url,
@@ -231,11 +362,12 @@ def scan_url(user_target):
         "ml_phish_probability": ml_phish_probability,
         "risk_percent": risk_percent,
         "safety_percent": safety_percent,
+        "confidence": confidence,
+        "category": category,
         "is_malicious_class": is_malicious_class,
         "scanned_at": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
 
-# 7. Report builders (PDF + CSV) for a single scan result
 def build_single_scan_csv(result):
     row = {
         "Scanned URL": result["input_url"],
@@ -244,6 +376,8 @@ def build_single_scan_csv(result):
         "Verdict": "DANGEROUS" if result["is_malicious_class"] else "SAFE",
         "Risk %": result["risk_percent"],
         "Safety %": result["safety_percent"],
+        "Confidence %": result["confidence"],
+        "Category": result["category"],
         "Server IP": result["resolved_ip"],
         "DNS Status": result["dns_status_log"],
         "SSL": "Yes" if result["pro_meta"]["is_ssl"] else "No",
@@ -260,13 +394,12 @@ def build_single_scan_csv(result):
 def build_single_scan_pdf(result):
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
-        fig, ax = plt.subplots(figsize=(8.27, 11.69))  # A4 portrait
+        fig, ax = plt.subplots(figsize=(8.27, 11.69))
         ax.axis("off")
-        fig.patch.set_facecolor('white')
-
+        fig.patch.set_facecolor("white")
         verdict = "⚠ DANGEROUS" if result["is_malicious_class"] else "✔ SAFE"
         lines = [
-            "THREAT-X GLOBAL GUARD PRO — Scan Report",
+            "THREAT-X AI — Scan Report",
             "=" * 60,
             f"Scanned URL:      {result['input_url']}",
             f"Final URL:        {result['final_url']}",
@@ -276,6 +409,8 @@ def build_single_scan_pdf(result):
             f"VERDICT: {verdict}",
             f"Risk Score:   {result['risk_percent']}%",
             f"Safety Score: {result['safety_percent']}%",
+            f"Confidence:   {result['confidence']}%",
+            f"Category:     {result['category']}",
             "",
             "-- Network --",
             f"Server IP:    {result['resolved_ip']}  ({result['dns_status_log']})",
@@ -293,299 +428,173 @@ def build_single_scan_pdf(result):
             ]
         else:
             lines.append(f"WHOIS unavailable: {result['whois_info'].get('error')}")
-
         lines.append("")
         lines.append("-- Geolocation --")
         if result["geo_info"]:
             g = result["geo_info"]
-            lines += [
-                f"Country: {g['country']}   City: {g['city']}   ISP: {g['isp']}",
-            ]
+            lines.append(f"Country: {g['country']}   City: {g['city']}   ISP: {g['isp']}")
         else:
             lines.append("Geolocation unavailable.")
-
         if len(result["redirect_chain"]) > 1:
             lines.append("")
             lines.append("-- Redirect Chain --")
             for i, hop in enumerate(result["redirect_chain"]):
                 lines.append(f"  {i+1}. {hop}")
-
-        ax.text(0.02, 0.98, "\n".join(lines), va="top", ha="left", fontsize=9,
-                family="monospace", transform=ax.transAxes, wrap=True)
+        ax.text(0.02, 0.98, "\n".join(lines), va="top", ha="left", fontsize=9, family="monospace", transform=ax.transAxes, wrap=True)
         pdf.savefig(fig)
         plt.close(fig)
     return buf.getvalue()
 
-# 8. User Console Interface — Single Scan / Bulk Scan
-tab_single, tab_bulk = st.tabs(["🔍 Single Scan", "📂 Bulk Scan"])
+def gauge_fig(value, title):
+    color = "#00E676" if value < 35 else "#FACC15" if value < 70 else "#FF4D4D"
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=value,
+        number={"suffix": "%", "font": {"size": 28, "color": "white"}},
+        title={"text": f"<b>{title}</b>", "font": {"size": 20, "color": "white"}},
+        gauge={
+            "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "white", "visible": False},
+            "bar": {"color": color, "thickness": 0.3},
+            "bgcolor": "rgba(255,255,255,0.03)",
+            "borderwidth": 0,
+            "steps": [
+                {"range": [0, 35], "color": "rgba(0,230,118,0.12)"},
+                {"range": [35, 70], "color": "rgba(250,204,21,0.12)"},
+                {"range": [70, 100], "color": "rgba(255,77,77,0.12)"},
+            ],
+        },
+        domain={"x": [0, 1], "y": [0, 1]},
+    ))
+    fig.add_annotation(x=0.5, y=0.15, text=f"<b>{value}%</b>", showarrow=False, font=dict(size=20, color="white"), xref="paper", yref="paper")
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(t=40, b=10, l=10, r=10),
+        height=260,
+    )
+    return fig
 
-with tab_single:
-    user_target = st.text_input("🔗 Enter website link here to analyze secure features:", placeholder="e.g., https://my-safe-website.com")
+def status_html(result):
+    safe = not result["is_malicious_class"]
+    klass = "status-safe" if safe else "status-danger"
+    title = "✅ SAFE WEBSITE" if safe else "🚨 DANGEROUS WEBSITE"
+    return f"""
+    <div class="glass-card {klass}">
+      <div class="status-title">{title}</div>
+      <div class="status-grid">
+        <div class="status-item">
+          <div class="status-label">Risk Score</div>
+          <div class="status-value">{result["risk_percent"]}%</div>
+        </div>
+        <div class="status-item">
+          <div class="status-label">Confidence</div>
+          <div class="status-value">{result["confidence"]}%</div>
+        </div>
+        <div class="status-item">
+          <div class="status-label">Category</div>
+          <div class="status-value">{result["category"]}</div>
+        </div>
+      </div>
+    </div>
+    """
 
-    if st.button("🔍 SCAN WEBSITE NOW"):
-        if user_target:
-            with st.spinner("Tracing redirects, analyzing server protocols and WHOIS records..."):
-                result = scan_url(user_target)
+def progress_bar_html(label, pct):
+    return f"""
+    <div class="glass-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:800">{label}</div>
+        <div style="font-family:monospace">{pct}%</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.06);border-radius:999px;height:14px;overflow:hidden">
+        <div style="width:{pct}%;height:14px;border-radius:999px;background:linear-gradient(90deg,var(--accent3),var(--accent1),var(--accent2));box-shadow:0 0 16px rgba(0,245,255,0.22)"></div>
+      </div>
+    </div>
+    """
 
-            risk_percent = result["risk_percent"]
-            safety_percent = result["safety_percent"]
-            is_malicious_class = result["is_malicious_class"]
-            resolved_ip = result["resolved_ip"]
-            dns_status_log = result["dns_status_log"]
-            geo_info = result["geo_info"]
-            whois_info = result["whois_info"]
-            feature_weights = result["feature_weights"]
-            pro_meta = result["pro_meta"]
-            redirect_chain = result["redirect_chain"]
-            ml_phish_probability = result["ml_phish_probability"]
+left, right = st.columns([1.05, 1.6], gap="large")
 
-            # METRICS & ANALYSIS DASHBOARD
-            st.write("---")
-            st.write("### 📊 Automated Threat Analysis Report")
+with left:
+    user_target = st.text_input("🔍 Enter Website URL", placeholder="https://example.com", label_visibility="collapsed")
+    scan_btn = st.button("Scan Website", type="primary", use_container_width=True)
 
-            m_col1, m_col2, m_col3 = st.columns(3)
-            if is_malicious_class:
-                m_col1.metric(label="🛡️ SCANNER STATUS", value="⚠️ DANGEROUS", delta="RISK DETECTED", delta_color="inverse")
-                m_col2.metric(label="🚨 RISK PERCENTAGE", value=f"{risk_percent}%", delta="HIGH RISK", delta_color="inverse")
-                m_col3.metric(label="🟢 SAFETY FACTOR", value=f"{safety_percent}%", delta="UNSAFE ZONE", delta_color="inverse")
-            else:
-                m_col1.metric(label="🛡️ SCANNER STATUS", value="✅ SAFE LINK", delta="CLEAN CERTIFICATE")
-                m_col2.metric(label="🚨 RISK PERCENTAGE", value=f"{risk_percent}%", delta="LOW RISK")
-                m_col3.metric(label="🟢 SAFETY FACTOR", value=f"{safety_percent}%", delta="SECURE OPERATIONS")
+    st.markdown("<div class='glass-card'><div class='section-title'>🧭 Live Scan</div><div class='small-note' id='scanlog'>Ready to scan.</div></div>", unsafe_allow_html=True)
+    log_ph = st.empty()
+    status_ph = st.empty()
 
-            st.write("---")
+with right:
+    gauge_ph = st.empty()
 
-            labels = ['Safety Index', 'Risk Index']
-            sizes = [safety_percent, risk_percent]
-            colors = ['#00ffcc', '#ff3333'] if not is_malicious_class else ['#161c2e', '#ff3333']
+if scan_btn and user_target:
+    steps = [
+        "Scanning DNS...",
+        "Checking SSL...",
+        "Loading WHOIS...",
+        "Running AI...",
+    ]
+    for s in steps:
+        log_ph.markdown(f"<div class='glass-card'><div class='section-title'>🧭 Live Scan</div><div class='mono'>{s}\n{'█' * (len(s) // 2)}</div></div>", unsafe_allow_html=True)
+        time.sleep(0.45)
 
-            fig_pie, ax = plt.subplots(figsize=(6, 2.4))
-            fig_pie.patch.set_facecolor('#060814')
-            ax.set_facecolor('#060814')
-            wedges, texts, autotexts = ax.pie(
-                sizes, labels=labels, colors=colors, autopct='%1.1f%%',
-                startangle=90, textprops=dict(color="w", weight="bold", size=10),
-                wedgeprops=dict(width=0.4, edgecolor='#1e293b')
-            )
-            for text in texts:
-                text.set_color('#ffffff')
-            ax.axis('equal')
-            st.pyplot(fig_pie)
-            plt.close(fig_pie)
+    with st.spinner("Analyzing URL..."):
+        result = scan_url(user_target)
 
-            st.write("---")
+    status_ph.markdown(status_html(result), unsafe_allow_html=True)
+    gauge_ph.plotly_chart(gauge_fig(result["risk_percent"], "Risk Meter"), use_container_width=True)
 
-            # PRO FEATURE: Redirect Chain Tracing
-            st.write("#### 🔀 Redirect Chain Trace:")
-            if len(redirect_chain) > 1:
-                st.warning(f"⚠️ This link redirects through {len(redirect_chain) - 1} hop(s) before reaching its final destination.")
-                for i, hop in enumerate(redirect_chain):
-                    tag = "🔗 Start" if i == 0 else ("🏁 Final Destination" if i == len(redirect_chain) - 1 else f"➡️ Hop {i}")
-                    st.write(f"**{tag}:** `{hop}`")
-            else:
-                st.write(f"✅ No redirects detected — direct link to `{redirect_chain[0]}`")
+    st.markdown(progress_bar_html("Risk Progress", result["risk_percent"]), unsafe_allow_html=True)
+    st.markdown(progress_bar_html("AI Confidence", result["confidence"]), unsafe_allow_html=True)
 
-            st.write("---")
-            st.write("#### 📡 System Integrity Verification Details:")
-            l_col1, l_col2 = st.columns(2)
+    st.markdown("### 📡 System Integrity Verification", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"""
+        <div class="glass-card">
+          <div class="section-title">🌐 DNS</div>
+          <div class="mono">Server IP: {result["resolved_ip"]}\nStatus: {result["dns_status_log"]}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="glass-card">
+          <div class="section-title">📜 WHOIS</div>
+          <div class="mono">Registrar: {result["whois_info"].get("registrar", "N/A")}\nCreated: {result["whois_info"].get("creation_date", "N/A")}\nExpires: {result["whois_info"].get("expiration_date", "N/A")}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""
+        <div class="glass-card">
+          <div class="section-title">🌎 Geolocation</div>
+          <div class="mono">{(
+            f"Country: {result['geo_info']['country']}\nCity: {result['geo_info']['city']}\nRegion: {result['geo_info']['region']}\nISP: {result['geo_info']['isp']}"
+            if result["geo_info"] else "Geolocation unavailable."
+          )}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="glass-card">
+          <div class="section-title">🔀 Redirects</div>
+          <div class="timeline">{chr(10).join([f"● {u}" for u in result["redirect_chain"]])}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-            with l_col1:
-                st.write(f"🌐 **Website Host Server IP:** `{resolved_ip}`")
-                st.write(f"🔌 **Server Connection Status:** {dns_status_log}")
+    st.markdown("### 🧠 AI Prediction", unsafe_allow_html=True)
+    st.info(f"Extracted Feature Vector: {result['feature_weights']}")
+    st.markdown(f"- Random Forest Base Confidence Core: `{round(result['ml_phish_probability']*100, 1)}%`")
+    st.markdown(f"- URL Lexical Parameters: Length `{result['feature_weights'][0]}` | Subdomains `{result['feature_weights'][2]}` | Hyphens `{result['feature_weights'][3]}` | Entropy `{result['feature_weights'][4]}`")
 
-            with l_col2:
-                st.write(f"🧠 **AI Prediction Output:** :{'red[SUSPICIOUS ACTIVITY MATCH]' if is_malicious_class else 'green[LEGITIMATE WEBSITE SIGNATURE]'}")
+    st.markdown("### 📥 Export Report", unsafe_allow_html=True)
+    d1, d2 = st.columns(2)
+    with d1:
+        st.download_button("⬇️ Download PDF Report", data=build_single_scan_pdf(result), file_name=f"threatx_report_{result['host_domain']}.pdf", mime="application/pdf", use_container_width=True)
+    with d2:
+        st.download_button("⬇️ Download CSV Report", data=build_single_scan_csv(result), file_name=f"threatx_report_{result['host_domain']}.csv", mime="text/csv", use_container_width=True)
 
-            st.write("---")
+    if result["is_malicious_class"]:
+        st.error("🛑 ACTION RECOMMENDED: This URL shows suspicious characteristics.")
+    else:
+        st.success("✔ SECURITY CLEARANCE GRANTED: No phishing behavior detected.")
 
-            # PRO FEATURE: Live IP Geolocation
-            st.write("#### 🗺️ Live Server Geolocation:")
-            if geo_info:
-                g_col1, g_col2 = st.columns(2)
-                with g_col1:
-                    st.write(f"🌍 **Country:** {geo_info['country']}")
-                    st.write(f"🏙️ **City / Region:** {geo_info['city']}, {geo_info['region']}")
-                    st.write(f"🕒 **Timezone:** {geo_info['timezone']}")
-                with g_col2:
-                    st.write(f"📡 **ISP:** {geo_info['isp']}")
-                    st.write(f"🏢 **Organization:** {geo_info['org']}")
-                    if geo_info['lat'] is not None and geo_info['lon'] is not None:
-                        st.write(f"📍 **Coordinates:** {geo_info['lat']}, {geo_info['lon']}")
-                        st.map(pd.DataFrame({"lat": [geo_info['lat']], "lon": [geo_info['lon']]}))
-            else:
-                st.write("⚪ Geolocation unavailable — server unresolvable or lookup failed.")
-
-            st.write("---")
-
-            # PRO FEATURE: Full WHOIS registration history
-            st.write("#### 📜 Full WHOIS Registration History:")
-            if whois_info.get("found"):
-                st.write(f"📅 **Domain Age Assessment:** {whois_info['age_status']}")
-                w_col1, w_col2 = st.columns(2)
-                with w_col1:
-                    st.write(f"🏛️ **Registrar:** {whois_info['registrar']}")
-                    st.write(f"🆕 **Creation Date:** {whois_info['creation_date']}")
-                    st.write(f"⏳ **Expiration Date:** {whois_info['expiration_date']}")
-                with w_col2:
-                    st.write(f"🔄 **Last Updated:** {whois_info['updated_date']}")
-                    st.write(f"🏢 **Registrant Org:** {whois_info['org']}")
-                    st.write(f"🌐 **Registrant Country:** {whois_info['country']}")
-                if whois_info['name_servers']:
-                    st.write(f"🖥️ **Name Servers:** {', '.join(whois_info['name_servers'][:4])}")
-            else:
-                st.write(f"⚪ {whois_info.get('error', 'WHOIS data unavailable')}")
-
-            st.write("---")
-
-            # PRO FEATURE: Advanced heuristics breakdown table
-            st.write("#### 🔍 Structural Feature Breakdown Table:")
-            breakdown_data = {
-                "Security Parameter Indicator": [
-                    "SSL Protocol Encryption Status",
-                    "Domain Raw IP Address Mask Check",
-                    "Suspicious Login/Verify Keyword Flag",
-                    "URL Hyphen Clustering Matrix",
-                    "Subdomain Layer Count Check",
-                    "Redirect Chain Depth Check",
-                ],
-                "Observed Metric Value": [
-                    "HTTPS Secured" if pro_meta["is_ssl"] == 1 else "Insecure HTTP Standard",
-                    "Masked Raw IP Address Detected" if pro_meta["is_ip_masked"] == 1 else "Legitimate Text String Domain",
-                    "Triggered (Malicious Keywords Found)" if feature_weights[5] == 1 else "Clean Structural Patterns",
-                    f"{feature_weights[3]} Structural Dash Elements Detected",
-                    f"{feature_weights[2]} Segment Subdomains Layered",
-                    f"{len(redirect_chain) - 1} Redirect Hop(s) Detected",
-                ],
-                "Risk Severity Rating": [
-                    "✅ LOW RISK" if pro_meta["is_ssl"] == 1 else "⚠️ MEDIUM RISK ALERT",
-                    "🚨 CRITICAL HIGH RISK" if pro_meta["is_ip_masked"] == 1 else "✅ SECURE INFRASTRUCTURE",
-                    "⚠️ HIGH SUSPICION" if feature_weights[5] == 1 else "✅ SECURE INFRASTRUCTURE",
-                    "⚠️ MINOR ANOMALY" if feature_weights[3] > 0 else "✅ SECURE INFRASTRUCTURE",
-                    "⚠️ MEDIUM SUSPICION" if feature_weights[2] > 1 else "✅ SECURE INFRASTRUCTURE",
-                    "⚠️ MEDIUM SUSPICION" if len(redirect_chain) > 2 else "✅ SECURE INFRASTRUCTURE",
-                ]
-            }
-            st.table(pd.DataFrame(breakdown_data))
-
-            st.write("---")
-            st.write("#### 🧠 Technical System Ingestion Metrics:")
-            st.info(f"**Extracted Live Feature Vector Sequence:** {feature_weights}")
-            st.markdown(f"""
-            - **Random Forest Base Confidence Core:** `{round(ml_phish_probability*100, 1)}% Structural Deviation Weight`
-            - **URL Lexical Parameters Check:** Length: `{feature_weights[0]}` | Subdomains Detected: `{feature_weights[2]}` | Structural Hyphens: `{feature_weights[3]}` | String Entropy: `{feature_weights[4]}`
-            """)
-
-            if is_malicious_class:
-                st.error("🛑 ACTION RECOMMENDED: Our Artificial Intelligence engine recommends closing this tab immediately. The URL demonstrates verified fraudulent design footprints.")
-            else:
-                st.success("✔ SECURITY CLEARANCE GRANTED: This website satisfies all structural security patterns. No phishing behaviors were detected.")
-
-            # PRO FEATURE: Downloadable report
-            st.write("---")
-            st.write("#### 📥 Export This Report:")
-            d_col1, d_col2 = st.columns(2)
-            with d_col1:
-                st.download_button(
-                    "⬇️ Download PDF Report",
-                    data=build_single_scan_pdf(result),
-                    file_name=f"threatx_report_{result['host_domain']}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
-            with d_col2:
-                st.download_button(
-                    "⬇️ Download CSV Report",
-                    data=build_single_scan_csv(result),
-                    file_name=f"threatx_report_{result['host_domain']}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
-        else:
-            st.info("Please provide a valid website address string link to execute security scans.")
-
-with tab_bulk:
-    st.write("#### 📂 Bulk URL Scan")
-    st.write("Upload a CSV file with a column named **url** (or **URL**), or paste one link per line below.")
-
-    uploaded_csv = st.file_uploader("Upload CSV of URLs", type=["csv"])
-    pasted_urls = st.text_area("...or paste URLs here (one per line)", height=150, placeholder="https://example.com\nhttps://another-site.com")
-
-    if st.button("🔍 SCAN ALL URLS"):
-        url_list = []
-
-        if uploaded_csv is not None:
-            try:
-                df_in = pd.read_csv(uploaded_csv)
-                url_col = None
-                for c in df_in.columns:
-                    if c.strip().lower() == "url":
-                        url_col = c
-                        break
-                if url_col is None:
-                    st.error("CSV must contain a column named 'url'.")
-                else:
-                    url_list.extend([str(u).strip() for u in df_in[url_col].dropna().tolist()])
-            except Exception as e:
-                st.error(f"Could not read CSV file: {e}")
-
-        if pasted_urls.strip():
-            url_list.extend([u.strip() for u in pasted_urls.splitlines() if u.strip()])
-
-        url_list = list(dict.fromkeys(url_list))  # de-duplicate, preserve order
-
-        if not url_list:
-            st.info("Please upload a CSV or paste at least one URL to run a bulk scan.")
-        else:
-            progress = st.progress(0, text=f"Scanning 0 / {len(url_list)}...")
-            bulk_results = []
-
-            for i, u in enumerate(url_list):
-                try:
-                    res = scan_url(u)
-                    bulk_results.append({
-                        "URL": res["input_url"],
-                        "Final URL": res["final_url"],
-                        "Verdict": "⚠️ DANGEROUS" if res["is_malicious_class"] else "✅ SAFE",
-                        "Risk %": res["risk_percent"],
-                        "Redirect Hops": len(res["redirect_chain"]) - 1,
-                        "Server IP": res["resolved_ip"],
-                        "SSL": "Yes" if res["pro_meta"]["is_ssl"] else "No",
-                        "Domain Age (days)": res["whois_info"].get("age_days", "N/A"),
-                        "Country": res["geo_info"]["country"] if res["geo_info"] else "N/A",
-                    })
-                except Exception as e:
-                    bulk_results.append({
-                        "URL": u, "Final URL": "ERROR", "Verdict": "⚪ SCAN FAILED",
-                        "Risk %": "N/A", "Redirect Hops": "N/A", "Server IP": "N/A",
-                        "SSL": "N/A",
-                        "Domain Age (days)": "N/A", "Country": "N/A",
-                    })
-                progress.progress((i + 1) / len(url_list), text=f"Scanning {i + 1} / {len(url_list)}...")
-
-            progress.empty()
-
-            bulk_df = pd.DataFrame(bulk_results)
-
-            st.write("---")
-            st.write(f"### 📊 Bulk Scan Summary — {len(url_list)} URLs")
-
-            danger_count = sum(1 for r in bulk_results if r["Verdict"] == "⚠️ DANGEROUS")
-            safe_count = sum(1 for r in bulk_results if r["Verdict"] == "✅ SAFE")
-            failed_count = sum(1 for r in bulk_results if r["Verdict"] == "⚪ SCAN FAILED")
-
-            s_col1, s_col2, s_col3 = st.columns(3)
-            s_col1.metric("⚠️ Dangerous", danger_count)
-            s_col2.metric("✅ Safe", safe_count)
-            s_col3.metric("⚪ Failed", failed_count)
-
-            st.dataframe(bulk_df, use_container_width=True)
-
-            csv_buf = io.StringIO()
-            bulk_df.to_csv(csv_buf, index=False)
-            st.download_button(
-                "⬇️ Download Bulk Scan Results (CSV)",
-                data=csv_buf.getvalue().encode("utf-8"),
-                file_name="threatx_bulk_scan_results.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
+st.markdown("""
+<div class="footer">
+Powered by AI · Machine Learning · Random Forest · Python · Streamlit · Made by Vedant Agrawal
+</div>
+""", unsafe_allow_html=True)
