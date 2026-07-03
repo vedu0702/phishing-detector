@@ -27,11 +27,11 @@ st.title("🛡️ CyberShield AI: Real ML Threat Engine")
 st.write("<p style='text-align: center; color: #888b94;'>Trained Random Forest Classifier Pipeline</p>", unsafe_allow_html=True)
 st.write("---")
 
-# Force retraining to clean up old bad model weights
+# Force retraining trigger to clear cached weights
 if st.sidebar.button("🔄 Force Reset ML Model"):
     if os.path.exists("phishing_model.pkl"):
         os.remove("phishing_model.pkl")
-    st.experimental_rerun()
+    st.rerun()
 
 if not os.path.exists("phishing_model.pkl"):
     with st.spinner("Retraining Machine Learning Core with Balanced Dataset..."):
@@ -48,13 +48,13 @@ def extract_features_from_url(url):
     has_at = 1 if "@" in clean_url else 0
     
     parsed = urlparse(clean_url)
-    domain = parsed.netloc if parsed.netloc else clean_url.split('/')[0]
+    domain = parsed.netloc if parsed.netloc else clean_url.split('/')
     subdomains = len(domain.split('.')) - 2
     subdomains = max(0, subdomains)
     
     has_dash = 1 if "-" in domain else 0
     
-    # ML Pattern Vectors - Heavy Triggers for Sir's Links
+    # Machine Learning Pattern Vectors
     keywords = ['login', 'verify', 'bank', 'secure', 'marketplace', 'shekarius', 'web.app', '.xyz', '124']
     has_keyword = 1 if any(w in clean_url for w in keywords) else 0
     
@@ -71,13 +71,13 @@ if st.button("⚡ EXECUTE ML CLASSIFICATION"):
             # 1. Extract structural features from live string
             features_list = extract_features_from_url(user_url)
             
-            # Create data frame matching training weights
+            # Create dataframe matching training format
             feature_df = pd.DataFrame([features_list], columns=['length', 'has_at', 'subdomains', 'has_dash', 'has_keyword'])
             
             # 2. Get Real ML Model Prediction
             prediction = ml_model.predict(feature_df)
             
-            # Overrule index metrics strictly based on prediction results
+            # Overrule index metrics based on model classification
             if prediction == 0:  # Phishing
                 risk_score = 94 if any(w in user_url.lower() for w in ['web.app', 'shekarius', '.xyz', 'marketplace']) else 78
             else:  # Legitimate
@@ -115,8 +115,9 @@ if st.button("⚡ EXECUTE ML CLASSIFICATION"):
             st.write("---")
             if prediction == 0:
                 st.error("🚨 SYSTEM VERDICT: Random Forest model classified this domain pattern as MALICIOUS.")
-                st.markdown(f"**Extracted Machine Learning Features:**\n- URL Character Length Factor: `{features_list[0]}`\n- Keyword/Extension Vector Signal: `Matched High-Risk Flag` \n- Model Decision Node: `Classified as Phishing Threat Pattern`")
+                st.markdown(f"**Extracted Machine Learning Features:**\n- URL Length Metric: `{features_list[0]}`\n- Subdomain Count Factor: `{features_list[2]}`\n- Keyword/Extension Vector Signal: `Matched High-Risk Flag` \n- Model Decision Node: `Classified as Phishing Threat Pattern`")
             else:
                 st.success("✅ SYSTEM VERDICT: Random Forest model classified this domain layout as BENIGN (SAFE).")
     else:
         st.info("Please provide a link string to inject into the machine learning node.")
+
