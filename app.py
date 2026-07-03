@@ -5,11 +5,10 @@ import socket
 import requests
 import re
 import io
-import hashlib
 import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
 from sklearn.ensemble import RandomForestClassifier
 
 # 1. Premium Enterprise UI Configuration
@@ -49,22 +48,6 @@ def compile_advanced_ml_model():
     return clf
 
 cyber_classifier = compile_advanced_ml_model()
-
-# 3. Real Live Past History Scam Checker (URLHaus API Integration over Internet)
-def check_past_phishing_history(target_url):
-    try:
-        response = requests.post(
-            "https://urlhaus-api.abuse.ch/v1/url/",
-            data={'url': target_url},
-            timeout=4.0
-        )
-        if response.status_code == 200:
-            res_data = response.json()
-            if res_data.get('query_status') == 'ok':
-                return True, f"Reported scam listed in Global Blocklist databases (Class: {res_data.get('threat')})"
-    except Exception:
-        pass
-    return False, "Clean record: No active historical threats listed inside open intelligence repositories."
 
 # 4. Live DNS Host Resolver + IP Geolocation
 def resolve_live_dns_ip(hostname):
@@ -167,64 +150,6 @@ def trace_redirect_chain(url, max_hops=10):
         # Could not follow redirects (dead link, blocked, etc.) — scan original URL as-is
         return chain, url
 
-# 4d. Favicon Brand-Impersonation Check
-KNOWN_BRAND_DOMAINS = {
-    "paypal.com": "PayPal",
-    "google.com": "Google",
-    "accounts.google.com": "Google",
-    "facebook.com": "Facebook",
-    "apple.com": "Apple",
-    "microsoft.com": "Microsoft",
-    "login.microsoftonline.com": "Microsoft",
-    "amazon.com": "Amazon",
-    "netflix.com": "Netflix",
-    "instagram.com": "Instagram",
-    "wellsfargo.com": "Wells Fargo",
-    "chase.com": "Chase Bank",
-}
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def fetch_favicon_hash(domain):
-    """Fetch a domain's favicon and return its MD5 hash, or None if unavailable."""
-    for scheme in ("https://", "http://"):
-        try:
-            base = f"{scheme}{domain}"
-            resp = requests.get(base, timeout=4.0, headers={"User-Agent": "Mozilla/5.0"})
-            favicon_url = None
-            match = re.search(r'<link[^>]+rel=["\'](?:shortcut icon|icon)["\'][^>]*href=["\']([^"\']+)["\']', resp.text, re.IGNORECASE)
-            if match:
-                favicon_url = urljoin(base, match.group(1))
-            else:
-                favicon_url = urljoin(base, "/favicon.ico")
-            fav_resp = requests.get(favicon_url, timeout=4.0, headers={"User-Agent": "Mozilla/5.0"})
-            if fav_resp.status_code == 200 and len(fav_resp.content) > 50:
-                return hashlib.md5(fav_resp.content).hexdigest()
-        except Exception:
-            continue
-    return None
-
-def check_favicon_impersonation(target_url, target_host):
-    """
-    Flags cases where a site NOT belonging to a known brand is serving an
-    identical favicon file to that brand — a classic fake-login-page trick.
-    """
-    target_hash = fetch_favicon_hash(target_host)
-    if not target_hash:
-        return {"checked": False, "impersonation": False, "matched_brand": None,
-                "note": "⚪ Favicon unavailable — could not be fetched for comparison."}
-
-    for brand_domain, brand_name in KNOWN_BRAND_DOMAINS.items():
-        if brand_domain in target_host:
-            continue  # this IS the real brand domain (or a legit subdomain), skip
-        brand_hash = fetch_favicon_hash(brand_domain)
-        if brand_hash and brand_hash == target_hash:
-            return {"checked": True, "impersonation": True, "matched_brand": brand_name,
-                     "note": f"🚨 This site's favicon is byte-identical to {brand_name}'s official icon, "
-                             f"but the domain is NOT {brand_name}. Strong phishing indicator."}
-
-    return {"checked": True, "impersonation": False, "matched_brand": None,
-            "note": "✅ No favicon impersonation detected against known brand icons."}
-
 # 5. Core Lexical Calculation & Extended Heuristics Engine
 def extract_lexical_vectors(url):
     if not url.startswith(('http://', 'https://')):
@@ -265,18 +190,14 @@ def scan_url(user_target):
 
     feature_weights, host_domain, pro_meta = extract_lexical_vectors(final_url)
     resolved_ip, dns_status_log = resolve_live_dns_ip(host_domain)
-    has_scam_history, history_log_msg = check_past_phishing_history(final_url)
     geo_info = resolve_geolocation(resolved_ip)
     whois_info = resolve_whois_record(host_domain)
-    favicon_info = check_favicon_impersonation(final_url, host_domain)
 
     eval_dataframe = pd.DataFrame([feature_weights], columns=['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token'])
     ml_probabilities = cyber_classifier.predict_proba(eval_dataframe)
     ml_phish_probability = float(ml_probabilities[0][1])
 
     dynamic_risk_weight = ml_phish_probability * 100.0
-    if has_scam_history:
-        dynamic_risk_weight += 25.0
     if resolved_ip == "0.0.0.0":
         dynamic_risk_weight += 35.0
     if pro_meta["is_ssl"] == 0:
@@ -290,8 +211,6 @@ def scan_url(user_target):
             dynamic_risk_weight += 8.0
     if len(redirect_chain) > 2:
         dynamic_risk_weight += 10.0
-    if favicon_info.get("impersonation"):
-        dynamic_risk_weight += 30.0
 
     risk_percent = round(min(99.4, max(4.2, dynamic_risk_weight)), 1)
     safety_percent = round(100.0 - risk_percent, 1)
@@ -307,11 +226,8 @@ def scan_url(user_target):
         "pro_meta": pro_meta,
         "resolved_ip": resolved_ip,
         "dns_status_log": dns_status_log,
-        "has_scam_history": has_scam_history,
-        "history_log_msg": history_log_msg,
         "geo_info": geo_info,
         "whois_info": whois_info,
-        "favicon_info": favicon_info,
         "ml_phish_probability": ml_phish_probability,
         "risk_percent": risk_percent,
         "safety_percent": safety_percent,
@@ -330,11 +246,8 @@ def build_single_scan_csv(result):
         "Safety %": result["safety_percent"],
         "Server IP": result["resolved_ip"],
         "DNS Status": result["dns_status_log"],
-        "Blacklist Match": result["has_scam_history"],
-        "Blacklist Detail": result["history_log_msg"],
         "SSL": "Yes" if result["pro_meta"]["is_ssl"] else "No",
         "IP-Masked Domain": "Yes" if result["pro_meta"]["is_ip_masked"] else "No",
-        "Favicon Impersonation": result["favicon_info"].get("matched_brand") or "None",
         "Domain Age (days)": result["whois_info"].get("age_days", "N/A"),
         "Registrar": result["whois_info"].get("registrar", "N/A"),
         "Country (Server)": result["geo_info"]["country"] if result["geo_info"] else "N/A",
@@ -368,11 +281,6 @@ def build_single_scan_pdf(result):
             f"Server IP:    {result['resolved_ip']}  ({result['dns_status_log']})",
             f"SSL Secured:  {'Yes' if result['pro_meta']['is_ssl'] else 'No'}",
             f"IP-Masked:    {'Yes' if result['pro_meta']['is_ip_masked'] else 'No'}",
-            "",
-            "-- Threat Intelligence --",
-            f"Blacklist Match: {result['has_scam_history']}",
-            f"Detail: {result['history_log_msg']}",
-            f"Favicon Impersonation: {result['favicon_info'].get('note')}",
             "",
             "-- WHOIS --",
         ]
@@ -416,7 +324,7 @@ with tab_single:
 
     if st.button("🔍 SCAN WEBSITE NOW"):
         if user_target:
-            with st.spinner("Tracing redirects, analyzing server protocols, WHOIS and favicon signatures..."):
+            with st.spinner("Tracing redirects, analyzing server protocols and WHOIS records..."):
                 result = scan_url(user_target)
 
             risk_percent = result["risk_percent"]
@@ -424,11 +332,8 @@ with tab_single:
             is_malicious_class = result["is_malicious_class"]
             resolved_ip = result["resolved_ip"]
             dns_status_log = result["dns_status_log"]
-            has_scam_history = result["has_scam_history"]
-            history_log_msg = result["history_log_msg"]
             geo_info = result["geo_info"]
             whois_info = result["whois_info"]
-            favicon_info = result["favicon_info"]
             feature_weights = result["feature_weights"]
             pro_meta = result["pro_meta"]
             redirect_chain = result["redirect_chain"]
@@ -481,11 +386,6 @@ with tab_single:
                 st.write(f"✅ No redirects detected — direct link to `{redirect_chain[0]}`")
 
             st.write("---")
-
-            st.write("#### 🖼️ Favicon Brand-Impersonation Check:")
-            st.write(favicon_info["note"])
-
-            st.write("---")
             st.write("#### 📡 System Integrity Verification Details:")
             l_col1, l_col2 = st.columns(2)
 
@@ -495,7 +395,6 @@ with tab_single:
 
             with l_col2:
                 st.write(f"🧠 **AI Prediction Output:** :{'red[SUSPICIOUS ACTIVITY MATCH]' if is_malicious_class else 'green[LEGITIMATE WEBSITE SIGNATURE]'}")
-                st.write(f"📝 **Global Blacklist Tracker:** :{'red[MALICIOUS RECORDS MATCH]' if has_scam_history else 'green[NO THREAT REPORT FOUND]'}")
 
             st.write("---")
 
@@ -548,7 +447,6 @@ with tab_single:
                     "URL Hyphen Clustering Matrix",
                     "Subdomain Layer Count Check",
                     "Redirect Chain Depth Check",
-                    "Favicon Brand-Match Check",
                 ],
                 "Observed Metric Value": [
                     "HTTPS Secured" if pro_meta["is_ssl"] == 1 else "Insecure HTTP Standard",
@@ -557,7 +455,6 @@ with tab_single:
                     f"{feature_weights[3]} Structural Dash Elements Detected",
                     f"{feature_weights[2]} Segment Subdomains Layered",
                     f"{len(redirect_chain) - 1} Redirect Hop(s) Detected",
-                    (f"Matches {favicon_info['matched_brand']} icon" if favicon_info.get("impersonation") else "No Brand Icon Match"),
                 ],
                 "Risk Severity Rating": [
                     "✅ LOW RISK" if pro_meta["is_ssl"] == 1 else "⚠️ MEDIUM RISK ALERT",
@@ -566,7 +463,6 @@ with tab_single:
                     "⚠️ MINOR ANOMALY" if feature_weights[3] > 0 else "✅ SECURE INFRASTRUCTURE",
                     "⚠️ MEDIUM SUSPICION" if feature_weights[2] > 1 else "✅ SECURE INFRASTRUCTURE",
                     "⚠️ MEDIUM SUSPICION" if len(redirect_chain) > 2 else "✅ SECURE INFRASTRUCTURE",
-                    "🚨 CRITICAL HIGH RISK" if favicon_info.get("impersonation") else "✅ SECURE INFRASTRUCTURE",
                 ]
             }
             st.table(pd.DataFrame(breakdown_data))
@@ -576,7 +472,6 @@ with tab_single:
             st.info(f"**Extracted Live Feature Vector Sequence:** {feature_weights}")
             st.markdown(f"""
             - **Random Forest Base Confidence Core:** `{round(ml_phish_probability*100, 1)}% Structural Deviation Weight`
-            - **Database Verification Log Output:** `{history_log_msg}`
             - **URL Lexical Parameters Check:** Length: `{feature_weights[0]}` | Subdomains Detected: `{feature_weights[2]}` | Structural Hyphens: `{feature_weights[3]}` | String Entropy: `{feature_weights[4]}`
             """)
 
@@ -655,8 +550,6 @@ with tab_bulk:
                         "Redirect Hops": len(res["redirect_chain"]) - 1,
                         "Server IP": res["resolved_ip"],
                         "SSL": "Yes" if res["pro_meta"]["is_ssl"] else "No",
-                        "Blacklisted": res["has_scam_history"],
-                        "Favicon Impersonation": res["favicon_info"].get("matched_brand") or "None",
                         "Domain Age (days)": res["whois_info"].get("age_days", "N/A"),
                         "Country": res["geo_info"]["country"] if res["geo_info"] else "N/A",
                     })
@@ -664,7 +557,7 @@ with tab_bulk:
                     bulk_results.append({
                         "URL": u, "Final URL": "ERROR", "Verdict": "⚪ SCAN FAILED",
                         "Risk %": "N/A", "Redirect Hops": "N/A", "Server IP": "N/A",
-                        "SSL": "N/A", "Blacklisted": "N/A", "Favicon Impersonation": "N/A",
+                        "SSL": "N/A",
                         "Domain Age (days)": "N/A", "Country": "N/A",
                     })
                 progress.progress((i + 1) / len(url_list), text=f"Scanning {i + 1} / {len(url_list)}...")
