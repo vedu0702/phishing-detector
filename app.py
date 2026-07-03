@@ -178,5 +178,6 @@ if st.button("🔍 SCAN WEBSITE NOW"):
                 st.error("🛑 ACTION RECOMMENDED: Our Artificial Intelligence engine recommends closing this tab immediately. The URL demonstrates verified fraudulent design footprints.")
             else:
                 st.success("✔ SECURITY CLEARANCE GRANTED: This website satisfies all structural security patterns. No phishing behaviors were detected.")
-            else:
-                st.info("Please provide a valid website address string link to execute security scans.")
+                
+        else:
+            st.info("Please provide a valid website address string link to execute security scans.")
