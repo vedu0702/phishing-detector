@@ -17,7 +17,6 @@ try:
     WHOIS_AVAILABLE = True
 except ImportError:
     WHOIS_AVAILABLE = False
-    st.warning("⚠️ python-whois not installed. WHOIS features will be limited.")
 
 # ============ PAGE CONFIG ============
 st.set_page_config(
@@ -68,6 +67,10 @@ st.markdown("""
     .css-1d391kg {
         background-color: #060814;
     }
+    /* Progress bar styling */
+    .stProgress > div > div {
+        background-color: #00ffcc !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -105,7 +108,7 @@ def compile_advanced_ml_model():
 cyber_classifier = compile_advanced_ml_model()
 
 # ============ CACHED FUNCTIONS ============
-@st.cache_data(ttl=3600)  # 1 hour cache
+@st.cache_data(ttl=3600)
 def resolve_live_dns_ip(hostname):
     try:
         if ":" in hostname:
@@ -377,9 +380,28 @@ with tab_single:
     if st.button("🔍 SCAN WEBSITE NOW"):
         if user_target:
             try:
-                with st.spinner("Tracing redirects, analyzing server protocols and WHOIS records..."):
-                    result = scan_url(user_target)
+                # ✅ PROGRESS BAR ADDED FOR SINGLE SCAN
+                progress_text = st.empty()
+                progress_bar = st.progress(0, text="⏳ Initializing scan...")
                 
+                # Step 1: DNS Resolution
+                progress_bar.progress(20, text="🌐 Resolving DNS and tracing redirects...")
+                
+                # Step 2: Full Scan
+                progress_bar.progress(40, text="🔍 Analyzing website structure...")
+                result = scan_url(user_target)
+                
+                progress_bar.progress(70, text="📡 Fetching WHOIS and geolocation data...")
+                
+                progress_bar.progress(90, text="🧠 Running AI threat detection...")
+                
+                progress_bar.progress(100, text="✅ Scan complete! Generating report...")
+                
+                # Clear progress
+                progress_text.empty()
+                progress_bar.empty()
+                
+                # ===== REST OF THE CODE (SAME AS BEFORE) =====
                 risk_percent = result["risk_percent"]
                 safety_percent = result["safety_percent"]
                 is_malicious_class = result["is_malicious_class"]
@@ -392,7 +414,6 @@ with tab_single:
                 redirect_chain = result["redirect_chain"]
                 ml_phish_probability = result["ml_phish_probability"]
                 
-                # METRICS
                 st.write("---")
                 st.write("### 📊 Automated Threat Analysis Report")
                 
@@ -408,7 +429,6 @@ with tab_single:
                 
                 st.write("---")
                 
-                # PIE CHART
                 labels = ['Safety Index', 'Risk Index']
                 sizes = [safety_percent, risk_percent]
                 colors = ['#00ffcc', '#ff3333'] if not is_malicious_class else ['#161c2e', '#ff3333']
@@ -429,7 +449,6 @@ with tab_single:
                 
                 st.write("---")
                 
-                # REDIRECT CHAIN
                 st.write("#### 🔀 Redirect Chain Trace:")
                 if len(redirect_chain) > 1:
                     st.warning(f"⚠️ This link redirects through {len(redirect_chain) - 1} hop(s) before reaching its final destination.")
@@ -452,7 +471,6 @@ with tab_single:
                 
                 st.write("---")
                 
-                # GEOLOCATION
                 st.write("#### 🗺️ Live Server Geolocation:")
                 if geo_info:
                     g_col1, g_col2 = st.columns(2)
@@ -471,7 +489,6 @@ with tab_single:
                 
                 st.write("---")
                 
-                # WHOIS
                 st.write("#### 📜 Full WHOIS Registration History:")
                 if whois_info.get("found"):
                     st.write(f"📅 **Domain Age Assessment:** {whois_info['age_status']}")
@@ -491,7 +508,6 @@ with tab_single:
                 
                 st.write("---")
                 
-                # FEATURE BREAKDOWN
                 st.write("#### 🔍 Structural Feature Breakdown Table:")
                 breakdown_data = {
                     "Security Parameter Indicator": [
@@ -534,7 +550,6 @@ with tab_single:
                 else:
                     st.success("✔ SECURITY CLEARANCE GRANTED: This website satisfies all structural security patterns. No phishing behaviors were detected.")
                 
-                # DOWNLOAD BUTTONS
                 st.write("---")
                 st.write("#### 📥 Export This Report:")
                 d_col1, d_col2 = st.columns(2)
@@ -595,11 +610,16 @@ with tab_bulk:
         if not url_list:
             st.info("Please upload a CSV or paste at least one URL to run a bulk scan.")
         else:
-            progress = st.progress(0, text=f"Scanning 0 / {len(url_list)}...")
+            # ✅ PROGRESS BAR FOR BULK SCAN
+            progress_bar = st.progress(0, text=f"⏳ Initializing scan for {len(url_list)} URLs...")
             bulk_results = []
             
             for i, u in enumerate(url_list):
                 try:
+                    # Update progress
+                    progress_text = f"🔍 Scanning {i+1}/{len(url_list)}: {u[:50]}..."
+                    progress_bar.progress((i) / len(url_list), text=progress_text)
+                    
                     res = scan_url(u)
                     bulk_results.append({
                         "URL": res["input_url"],
@@ -619,9 +639,12 @@ with tab_bulk:
                         "SSL": "N/A",
                         "Domain Age (days)": "N/A", "Country": "N/A",
                     })
-                progress.progress((i + 1) / len(url_list), text=f"Scanning {i + 1} / {len(url_list)}...")
+                
+                # Update progress to show completion
+                progress_bar.progress((i + 1) / len(url_list), text=f"✅ Completed {i+1}/{len(url_list)}")
             
-            progress.empty()
+            # Clear progress
+            progress_bar.empty()
             
             bulk_df = pd.DataFrame(bulk_results)
             
