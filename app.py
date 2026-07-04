@@ -11,27 +11,381 @@ from matplotlib.backends.backend_pdf import PdfPages
 from urllib.parse import urlparse
 from sklearn.ensemble import RandomForestClassifier
 
-# 1. Premium Enterprise UI Configuration
-st.set_page_config(page_title="Threat-X Global Guard Pro", page_icon="🛡️", layout="centered")
+# 1. Premium Enterprise UI Configuration with Modern Dark Theme
+st.set_page_config(
+    page_title="Threat-X Global Guard Pro", 
+    page_icon="🛡️", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
+# Custom CSS for Premium Dark Theme
 st.markdown("""
     <style>
-    .main { background-color: #060814; }
-    div.block-container { padding-top: 2rem; }
-    h1 { color: #ffffff; text-align: center; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; }
-    h3 { color: #f1f5f9; font-family: 'Helvetica Neue', Arial, sans-serif; }
-    .stButton>button { background-color: #00ffcc; color: #060814; font-weight: bold; width: 100%; border-radius: 6px; height: 52px; font-size: 18px; border: none; transition: 0.3s; box-shadow: 0px 4px 15px rgba(0, 255, 204, 0.2); }
-    .stButton>button:hover { background-color: #00ccaa; box-shadow: 0px 0px 25px #00ffcc; transform: translateY(-1px); }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stAppDeployButton {display:none;}
+        /* Main Background with Gradient */
+        .stApp {
+            background: linear-gradient(135deg, #0a0e1a 0%, #1a1f35 50%, #0d1225 100%);
+        }
+        
+        /* Main Container */
+        .main > div {
+            background: rgba(10, 14, 26, 0.85);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 2rem;
+            margin: 1rem;
+            border: 1px solid rgba(0, 255, 204, 0.08);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+        }
+        
+        /* Hide Streamlit Default Elements */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        .stAppDeployButton {display:none;}
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #00ffcc, #00ccaa);
+            border-radius: 10px;
+        }
+        
+        /* Headers */
+        h1, h2, h3, h4, h5, h6 {
+            color: #ffffff !important;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+            font-weight: 600 !important;
+            letter-spacing: -0.02em !important;
+        }
+        
+        /* Main Title */
+        .main-title {
+            text-align: center;
+            padding: 2rem 0 1rem 0;
+            background: linear-gradient(180deg, rgba(0,255,204,0.03) 0%, transparent 100%);
+        }
+        
+        .main-title h1 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #ffffff 0%, #00ffcc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 0 40px rgba(0, 255, 204, 0.1);
+        }
+        
+        .main-title .subtitle {
+            color: #94a3b8;
+            font-size: 1.1rem;
+            font-weight: 400;
+            letter-spacing: 0.05em;
+            border-top: 1px solid rgba(0, 255, 204, 0.1);
+            padding-top: 1rem;
+            display: inline-block;
+        }
+        
+        .main-title .version-badge {
+            display: inline-block;
+            background: rgba(0, 255, 204, 0.1);
+            color: #00ffcc;
+            padding: 0.2rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            border: 1px solid rgba(0, 255, 204, 0.2);
+            margin-left: 0.5rem;
+        }
+        
+        /* Input Box */
+        .stTextInput > div > div > input {
+            background: rgba(255, 255, 255, 0.03) !important;
+            border: 1px solid rgba(0, 255, 204, 0.15) !important;
+            border-radius: 12px !important;
+            color: #ffffff !important;
+            padding: 0.8rem 1.2rem !important;
+            font-size: 1rem !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .stTextInput > div > div > input:focus {
+            border-color: #00ffcc !important;
+            box-shadow: 0 0 0 3px rgba(0, 255, 204, 0.1) !important;
+            background: rgba(255, 255, 255, 0.05) !important;
+        }
+        
+        .stTextInput > div > div > input::placeholder {
+            color: #475569 !important;
+        }
+        
+        /* Buttons */
+        .stButton > button {
+            background: linear-gradient(135deg, #00ffcc 0%, #00ccaa 100%) !important;
+            color: #0a0e1a !important;
+            font-weight: 700 !important;
+            border: none !important;
+            border-radius: 12px !important;
+            padding: 0.8rem 2rem !important;
+            font-size: 1.1rem !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 4px 20px rgba(0, 255, 204, 0.15) !important;
+            letter-spacing: 0.02em !important;
+            width: 100% !important;
+        }
+        
+        .stButton > button:hover {
+            transform: translateY(-2px) scale(1.01);
+            box-shadow: 0 8px 30px rgba(0, 255, 204, 0.25) !important;
+            background: linear-gradient(135deg, #00ffcc 0%, #00bbaa 100%) !important;
+        }
+        
+        .stButton > button:active {
+            transform: scale(0.98);
+        }
+        
+        /* Metrics */
+        [data-testid="metric-container"] {
+            background: rgba(255, 255, 255, 0.03) !important;
+            border: 1px solid rgba(0, 255, 204, 0.06) !important;
+            border-radius: 16px !important;
+            padding: 1.2rem !important;
+            backdrop-filter: blur(10px) !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        [data-testid="metric-container"]:hover {
+            border-color: rgba(0, 255, 204, 0.2) !important;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+        
+        [data-testid="metric-container"] label {
+            color: #94a3b8 !important;
+            font-weight: 500 !important;
+            font-size: 0.85rem !important;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        [data-testid="metric-container"] div {
+            color: #ffffff !important;
+            font-weight: 700 !important;
+        }
+        
+        /* Tabs */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0.5rem;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 12px;
+            padding: 0.3rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 8px !important;
+            padding: 0.6rem 1.5rem !important;
+            color: #94a3b8 !important;
+            font-weight: 500 !important;
+            transition: all 0.3s ease !important;
+            background: transparent !important;
+        }
+        
+        .stTabs [data-baseweb="tab"][aria-selected="true"] {
+            background: rgba(0, 255, 204, 0.1) !important;
+            color: #00ffcc !important;
+            border: 1px solid rgba(0, 255, 204, 0.2) !important;
+        }
+        
+        .stTabs [data-baseweb="tab"]:hover {
+            color: #ffffff !important;
+            background: rgba(255, 255, 255, 0.05) !important;
+        }
+        
+        /* Dataframe */
+        .stDataFrame {
+            border-radius: 12px !important;
+            overflow: hidden !important;
+            border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        }
+        
+        .stDataFrame thead tr th {
+            background: rgba(0, 255, 204, 0.05) !important;
+            color: #00ffcc !important;
+            font-weight: 600 !important;
+            padding: 0.8rem !important;
+            border-bottom: 2px solid rgba(0, 255, 204, 0.1) !important;
+        }
+        
+        .stDataFrame tbody tr td {
+            color: #e2e8f0 !important;
+            padding: 0.6rem !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important;
+        }
+        
+        .stDataFrame tbody tr:hover {
+            background: rgba(0, 255, 204, 0.02) !important;
+        }
+        
+        /* Info/Warning/Success Messages */
+        .stAlert {
+            border-radius: 12px !important;
+            border-left: 4px solid !important;
+            background: rgba(255, 255, 255, 0.02) !important;
+            backdrop-filter: blur(10px) !important;
+        }
+        
+        .stAlert > div {
+            color: #e2e8f0 !important;
+        }
+        
+        /* Download Buttons */
+        .stDownloadButton > button {
+            background: rgba(255, 255, 255, 0.05) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            color: #e2e8f0 !important;
+            border-radius: 10px !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .stDownloadButton > button:hover {
+            background: rgba(0, 255, 204, 0.1) !important;
+            border-color: #00ffcc !important;
+            color: #00ffcc !important;
+        }
+        
+        /* Code Blocks */
+        .stCodeBlock {
+            background: rgba(0, 0, 0, 0.3) !important;
+            border-radius: 12px !important;
+            border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        }
+        
+        /* Progress Bar */
+        .stProgress > div > div {
+            background: linear-gradient(90deg, #00ffcc, #00ccaa) !important;
+            border-radius: 10px !important;
+        }
+        
+        /* Spinner */
+        .stSpinner > div {
+            border-color: #00ffcc !important;
+        }
+        
+        /* Tables */
+        .stTable thead tr th {
+            background: rgba(0, 255, 204, 0.05) !important;
+            color: #00ffcc !important;
+            font-weight: 600 !important;
+        }
+        
+        .stTable tbody tr td {
+            color: #e2e8f0 !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important;
+        }
+        
+        /* Divider */
+        hr {
+            border: none !important;
+            height: 1px !important;
+            background: linear-gradient(90deg, transparent, rgba(0, 255, 204, 0.2), transparent) !important;
+            margin: 2rem 0 !important;
+        }
+        
+        /* Text Area */
+        .stTextArea > div > div > textarea {
+            background: rgba(255, 255, 255, 0.03) !important;
+            border: 1px solid rgba(0, 255, 204, 0.15) !important;
+            border-radius: 12px !important;
+            color: #ffffff !important;
+        }
+        
+        .stTextArea > div > div > textarea:focus {
+            border-color: #00ffcc !important;
+            box-shadow: 0 0 0 3px rgba(0, 255, 204, 0.1) !important;
+        }
+        
+        /* File Uploader */
+        .stFileUploader > div {
+            background: rgba(255, 255, 255, 0.02) !important;
+            border: 2px dashed rgba(0, 255, 204, 0.2) !important;
+            border-radius: 12px !important;
+            padding: 2rem !important;
+        }
+        
+        .stFileUploader > div:hover {
+            border-color: #00ffcc !important;
+            background: rgba(0, 255, 204, 0.02) !important;
+        }
+        
+        /* Column Headers */
+        .column-header {
+            color: #94a3b8;
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        /* Glowing Animation for Status */
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(0, 255, 204, 0.1); }
+            50% { box-shadow: 0 0 40px rgba(0, 255, 204, 0.2); }
+        }
+        
+        .glow-box {
+            animation: pulse-glow 3s ease-in-out infinite;
+        }
+        
+        /* Custom Badges */
+        .badge-safe {
+            display: inline-block;
+            background: rgba(0, 255, 204, 0.1);
+            color: #00ffcc;
+            padding: 0.2rem 0.8rem;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            border: 1px solid rgba(0, 255, 204, 0.2);
+        }
+        
+        .badge-danger {
+            display: inline-block;
+            background: rgba(255, 51, 51, 0.1);
+            color: #ff3333;
+            padding: 0.2rem 0.8rem;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            border: 1px solid rgba(255, 51, 51, 0.2);
+        }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-st.write("<div style='text-align: center; padding-top: 10px;'><span style='font-size: 38px; font-weight: 800; color: #ffffff; letter-spacing: 1px;'>THREAT</span><span style='font-size: 38px; font-weight: 800; color: #00ffcc; letter-spacing: 1px;'>-X</span><span style='font-size: 14px; font-weight: bold; color: #475569; margin-left: 8px;'>GLOBAL GUARD PRO v13.0</span></div>", unsafe_allow_html=True)
-st.write("<p style='text-align: center; color: #94a3b8; font-size: 15px; font-family: Arial;'>Enter any website address below to run our automated machine learning scanners and verify website authenticity instantly.</p>", unsafe_allow_html=True)
-st.write("---")
+# Main Header
+st.markdown("""
+    <div class="main-title">
+        <h1>🛡️ THREAT-X</h1>
+        <div style="display: flex; justify-content: center; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <span class="subtitle">GLOBAL GUARD PRO</span>
+            <span class="version-badge">v13.0</span>
+            <span style="color: #475569; font-size: 0.85rem;">• Enterprise Edition</span>
+        </div>
+        <p style="color: #64748b; font-size: 1rem; margin-top: 1rem; max-width: 600px; margin-left: auto; margin-right: auto; line-height: 1.6;">
+            Advanced ML-powered website authenticity verification with real-time threat intelligence
+        </p>
+    </div>
+""", unsafe_allow_html=True)
+
+st.markdown("---")
 
 # 2. Advanced RandomForest Framework Ingestion Block
 @st.cache_resource
@@ -262,7 +616,7 @@ def build_single_scan_pdf(result):
     with PdfPages(buf) as pdf:
         fig, ax = plt.subplots(figsize=(8.27, 11.69))  # A4 portrait
         ax.axis("off")
-        fig.patch.set_facecolor('white')
+        fig.patch.set_facecolor('#0a0e1a')
 
         verdict = "⚠ DANGEROUS" if result["is_malicious_class"] else "✔ SAFE"
         lines = [
@@ -311,8 +665,8 @@ def build_single_scan_pdf(result):
                 lines.append(f"  {i+1}. {hop}")
 
         ax.text(0.02, 0.98, "\n".join(lines), va="top", ha="left", fontsize=9,
-                family="monospace", transform=ax.transAxes, wrap=True)
-        pdf.savefig(fig)
+                family="monospace", transform=ax.transAxes, wrap=True, color='#e2e8f0')
+        pdf.savefig(fig, facecolor='#0a0e1a')
         plt.close(fig)
     return buf.getvalue()
 
@@ -320,197 +674,333 @@ def build_single_scan_pdf(result):
 tab_single, tab_bulk = st.tabs(["🔍 Single Scan", "📂 Bulk Scan"])
 
 with tab_single:
-    user_target = st.text_input("🔗 Enter website link here to analyze secure features:", placeholder="e.g., https://my-safe-website.com")
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        user_target = st.text_input(
+            "🔗 Enter website address",
+            placeholder="https://example.com",
+            label_visibility="collapsed"
+        )
+        
+        if st.button("🚀 ANALYZE WEBSITE", use_container_width=True):
+            if user_target:
+                with st.spinner("🔄 Analyzing website security patterns..."):
+                    result = scan_url(user_target)
 
-    if st.button("🔍 SCAN WEBSITE NOW"):
-        if user_target:
-            with st.spinner("Tracing redirects, analyzing server protocols and WHOIS records..."):
-                result = scan_url(user_target)
+                risk_percent = result["risk_percent"]
+                safety_percent = result["safety_percent"]
+                is_malicious_class = result["is_malicious_class"]
+                resolved_ip = result["resolved_ip"]
+                dns_status_log = result["dns_status_log"]
+                geo_info = result["geo_info"]
+                whois_info = result["whois_info"]
+                feature_weights = result["feature_weights"]
+                pro_meta = result["pro_meta"]
+                redirect_chain = result["redirect_chain"]
+                ml_phish_probability = result["ml_phish_probability"]
 
-            risk_percent = result["risk_percent"]
-            safety_percent = result["safety_percent"]
-            is_malicious_class = result["is_malicious_class"]
-            resolved_ip = result["resolved_ip"]
-            dns_status_log = result["dns_status_log"]
-            geo_info = result["geo_info"]
-            whois_info = result["whois_info"]
-            feature_weights = result["feature_weights"]
-            pro_meta = result["pro_meta"]
-            redirect_chain = result["redirect_chain"]
-            ml_phish_probability = result["ml_phish_probability"]
+                # METRICS & ANALYSIS DASHBOARD
+                st.markdown("---")
+                st.markdown("### 📊 Security Analysis Report")
+                
+                # Status Cards
+                col1, col2, col3 = st.columns(3)
+                
+                if is_malicious_class:
+                    col1.markdown("""
+                        <div style="background: rgba(255,51,51,0.05); border: 1px solid rgba(255,51,51,0.2); border-radius: 12px; padding: 1.2rem; text-align: center;">
+                            <div style="font-size: 2rem;">⚠️</div>
+                            <div style="color: #ff3333; font-weight: 700; font-size: 1.1rem;">DANGEROUS</div>
+                            <div style="color: #94a3b8; font-size: 0.8rem;">Threat Detected</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    col1.markdown("""
+                        <div style="background: rgba(0,255,204,0.05); border: 1px solid rgba(0,255,204,0.2); border-radius: 12px; padding: 1.2rem; text-align: center;">
+                            <div style="font-size: 2rem;">✅</div>
+                            <div style="color: #00ffcc; font-weight: 700; font-size: 1.1rem;">SAFE</div>
+                            <div style="color: #94a3b8; font-size: 0.8rem;">Verified Secure</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                col2.metric(
+                    label="🚨 Risk Score",
+                    value=f"{risk_percent}%",
+                    delta="High Risk" if is_malicious_class else "Low Risk",
+                    delta_color="inverse" if is_malicious_class else "normal"
+                )
+                
+                col3.metric(
+                    label="🟢 Safety Score",
+                    value=f"{safety_percent}%",
+                    delta="Protected" if not is_malicious_class else "Compromised",
+                    delta_color="normal" if not is_malicious_class else "inverse"
+                )
 
-            # METRICS & ANALYSIS DASHBOARD
-            st.write("---")
-            st.write("### 📊 Automated Threat Analysis Report")
+                st.markdown("---")
 
-            m_col1, m_col2, m_col3 = st.columns(3)
-            if is_malicious_class:
-                m_col1.metric(label="🛡️ SCANNER STATUS", value="⚠️ DANGEROUS", delta="RISK DETECTED", delta_color="inverse")
-                m_col2.metric(label="🚨 RISK PERCENTAGE", value=f"{risk_percent}%", delta="HIGH RISK", delta_color="inverse")
-                m_col3.metric(label="🟢 SAFETY FACTOR", value=f"{safety_percent}%", delta="UNSAFE ZONE", delta_color="inverse")
-            else:
-                m_col1.metric(label="🛡️ SCANNER STATUS", value="✅ SAFE LINK", delta="CLEAN CERTIFICATE")
-                m_col2.metric(label="🚨 RISK PERCENTAGE", value=f"{risk_percent}%", delta="LOW RISK")
-                m_col3.metric(label="🟢 SAFETY FACTOR", value=f"{safety_percent}%", delta="SECURE OPERATIONS")
+                # Risk Gauge
+                st.markdown("#### 📈 Risk Assessment Gauge")
+                
+                fig, ax = plt.subplots(figsize=(10, 2))
+                fig.patch.set_facecolor('transparent')
+                ax.set_facecolor('transparent')
+                
+                # Create horizontal bar chart
+                ax.barh([0], [risk_percent], color='#ff3333', height=0.4, alpha=0.8)
+                ax.barh([0], [safety_percent], left=[risk_percent], color='#00ffcc', height=0.4, alpha=0.6)
+                
+                # Add threshold lines
+                ax.axvline(x=45, color='#fbbf24', linestyle='--', linewidth=2, alpha=0.5, label='Threat Threshold')
+                
+                # Styling
+                ax.set_xlim(0, 100)
+                ax.set_yticks([])
+                ax.set_xlabel('Risk Percentage', color='#94a3b8')
+                ax.tick_params(colors='#94a3b8')
+                ax.spines['bottom'].set_color('#1e293b')
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.spines['left'].set_visible(False)
+                
+                # Add risk indicator
+                ax.text(risk_percent + 2, 0, f'Risk: {risk_percent}%', 
+                       va='center', color='#ffffff', fontweight='bold', fontsize=10)
+                
+                st.pyplot(fig)
+                plt.close(fig)
 
-            st.write("---")
+                st.markdown("---")
 
-            labels = ['Safety Index', 'Risk Index']
-            sizes = [safety_percent, risk_percent]
-            colors = ['#00ffcc', '#ff3333'] if not is_malicious_class else ['#161c2e', '#ff3333']
+                # PRO FEATURE: Redirect Chain Tracing
+                st.markdown("#### 🔀 Redirect Chain Analysis")
+                if len(redirect_chain) > 1:
+                    st.warning(f"⚠️ This URL redirects through {len(redirect_chain) - 1} hop(s) before reaching its destination.")
+                    for i, hop in enumerate(redirect_chain):
+                        tag = "🔗 Start" if i == 0 else ("🏁 Final" if i == len(redirect_chain) - 1 else f"➡️ Hop {i}")
+                        st.code(f"{tag}: {hop}", language="text")
+                else:
+                    st.success(f"✅ No redirects detected — direct connection to `{redirect_chain[0]}`")
 
-            fig_pie, ax = plt.subplots(figsize=(6, 2.4))
-            fig_pie.patch.set_facecolor('#060814')
-            ax.set_facecolor('#060814')
-            wedges, texts, autotexts = ax.pie(
-                sizes, labels=labels, colors=colors, autopct='%1.1f%%',
-                startangle=90, textprops=dict(color="w", weight="bold", size=10),
-                wedgeprops=dict(width=0.4, edgecolor='#1e293b')
-            )
-            for text in texts:
-                text.set_color('#ffffff')
-            ax.axis('equal')
-            st.pyplot(fig_pie)
-            plt.close(fig_pie)
+                st.markdown("---")
 
-            st.write("---")
+                # PRO FEATURE: Network & Infrastructure
+                st.markdown("#### 🌐 Network Infrastructure")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown(f"""
+                        <div style="background: rgba(255,255,255,0.02); border-radius: 10px; padding: 1rem;">
+                            <div style="color: #94a3b8; font-size: 0.85rem;">Server IP Address</div>
+                            <div style="color: #ffffff; font-weight: 600; font-size: 1.1rem;">{resolved_ip}</div>
+                            <div style="color: #94a3b8; font-size: 0.8rem; margin-top: 0.3rem;">{dns_status_log}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    ssl_status = "🔒 Secure (HTTPS)" if pro_meta["is_ssl"] else "🔓 Insecure (HTTP)"
+                    ip_mask = "⚠️ IP-Masked" if pro_meta["is_ip_masked"] else "✅ Clean Domain"
+                    st.markdown(f"""
+                        <div style="background: rgba(255,255,255,0.02); border-radius: 10px; padding: 1rem;">
+                            <div style="color: #94a3b8; font-size: 0.85rem;">Security Status</div>
+                            <div style="color: {'#00ffcc' if pro_meta['is_ssl'] else '#fbbf24'}; font-weight: 600; font-size: 1rem;">{ssl_status}</div>
+                            <div style="color: {'#ff3333' if pro_meta['is_ip_masked'] else '#00ffcc'}; font-size: 0.9rem; margin-top: 0.2rem;">{ip_mask}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
 
-            # PRO FEATURE: Redirect Chain Tracing
-            st.write("#### 🔀 Redirect Chain Trace:")
-            if len(redirect_chain) > 1:
-                st.warning(f"⚠️ This link redirects through {len(redirect_chain) - 1} hop(s) before reaching its final destination.")
-                for i, hop in enumerate(redirect_chain):
-                    tag = "🔗 Start" if i == 0 else ("🏁 Final Destination" if i == len(redirect_chain) - 1 else f"➡️ Hop {i}")
-                    st.write(f"**{tag}:** `{hop}`")
-            else:
-                st.write(f"✅ No redirects detected — direct link to `{redirect_chain[0]}`")
+                st.markdown("---")
 
-            st.write("---")
-            st.write("#### 📡 System Integrity Verification Details:")
-            l_col1, l_col2 = st.columns(2)
-
-            with l_col1:
-                st.write(f"🌐 **Website Host Server IP:** `{resolved_ip}`")
-                st.write(f"🔌 **Server Connection Status:** {dns_status_log}")
-
-            with l_col2:
-                st.write(f"🧠 **AI Prediction Output:** :{'red[SUSPICIOUS ACTIVITY MATCH]' if is_malicious_class else 'green[LEGITIMATE WEBSITE SIGNATURE]'}")
-
-            st.write("---")
-
-            # PRO FEATURE: Live IP Geolocation
-            st.write("#### 🗺️ Live Server Geolocation:")
-            if geo_info:
-                g_col1, g_col2 = st.columns(2)
-                with g_col1:
-                    st.write(f"🌍 **Country:** {geo_info['country']}")
-                    st.write(f"🏙️ **City / Region:** {geo_info['city']}, {geo_info['region']}")
-                    st.write(f"🕒 **Timezone:** {geo_info['timezone']}")
-                with g_col2:
-                    st.write(f"📡 **ISP:** {geo_info['isp']}")
-                    st.write(f"🏢 **Organization:** {geo_info['org']}")
+                # PRO FEATURE: Live IP Geolocation
+                st.markdown("#### 🗺️ Server Location Intelligence")
+                if geo_info:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"""
+                            <div style="background: rgba(255,255,255,0.02); border-radius: 10px; padding: 1rem;">
+                                <div style="color: #94a3b8; font-size: 0.85rem;">Location</div>
+                                <div style="color: #ffffff; font-weight: 600;">{geo_info['country']}</div>
+                                <div style="color: #e2e8f0; font-size: 0.9rem;">{geo_info['city']}, {geo_info['region']}</div>
+                                <div style="color: #94a3b8; font-size: 0.8rem; margin-top: 0.3rem;">Timezone: {geo_info['timezone']}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    with col2:
+                        st.markdown(f"""
+                            <div style="background: rgba(255,255,255,0.02); border-radius: 10px; padding: 1rem;">
+                                <div style="color: #94a3b8; font-size: 0.85rem;">Network Provider</div>
+                                <div style="color: #ffffff; font-weight: 600;">{geo_info['isp']}</div>
+                                <div style="color: #e2e8f0; font-size: 0.9rem;">{geo_info['org']}</div>
+                                <div style="color: #94a3b8; font-size: 0.8rem; margin-top: 0.3rem;">📍 {geo_info['lat']}, {geo_info['lon']}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    
                     if geo_info['lat'] is not None and geo_info['lon'] is not None:
-                        st.write(f"📍 **Coordinates:** {geo_info['lat']}, {geo_info['lon']}")
-                        st.map(pd.DataFrame({"lat": [geo_info['lat']], "lon": [geo_info['lon']]}))
+                        st.map(pd.DataFrame({"lat": [geo_info['lat']], "lon": [geo_info['lon']]}), use_container_width=True)
+                else:
+                    st.info("⚪ Geolocation data unavailable — server may be unreachable or using privacy protection.")
+
+                st.markdown("---")
+
+                # PRO FEATURE: Full WHOIS Registration History
+                st.markdown("#### 📜 Domain Registration History")
+                if whois_info.get("found"):
+                    st.markdown(f"<div style='background: rgba(255,255,255,0.02); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;'>{whois_info['age_status']}</div>", unsafe_allow_html=True)
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"""
+                            <div style="background: rgba(255,255,255,0.02); border-radius: 10px; padding: 1rem;">
+                                <div style="color: #94a3b8; font-size: 0.85rem;">Registrar</div>
+                                <div style="color: #ffffff; font-weight: 600;">{whois_info['registrar']}</div>
+                                <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.5rem;">Created</div>
+                                <div style="color: #e2e8f0;">{whois_info['creation_date']}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    with col2:
+                        st.markdown(f"""
+                            <div style="background: rgba(255,255,255,0.02); border-radius: 10px; padding: 1rem;">
+                                <div style="color: #94a3b8; font-size: 0.85rem;">Organization</div>
+                                <div style="color: #ffffff; font-weight: 600;">{whois_info['org']}</div>
+                                <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.5rem;">Expires</div>
+                                <div style="color: #e2e8f0;">{whois_info['expiration_date']}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    
+                    if whois_info['name_servers']:
+                        st.markdown(f"""
+                            <div style="background: rgba(255,255,255,0.02); border-radius: 10px; padding: 1rem; margin-top: 0.5rem;">
+                                <div style="color: #94a3b8; font-size: 0.85rem;">Name Servers</div>
+                                <div style="color: #e2e8f0; font-size: 0.9rem;">{', '.join(whois_info['name_servers'][:4])}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info(f"⚪ {whois_info.get('error', 'WHOIS data unavailable')}")
+
+                st.markdown("---")
+
+                # PRO FEATURE: Advanced heuristics breakdown
+                st.markdown("#### 🔍 Security Feature Analysis")
+                
+                # Create a nice table with icons
+                features_data = {
+                    "Security Parameter": [
+                        "SSL/TLS Encryption",
+                        "Domain Structure",
+                        "Keyword Analysis",
+                        "URL Complexity",
+                        "Subdomain Count",
+                        "Redirect Depth",
+                        "Domain Age",
+                        "IP Address Type"
+                    ],
+                    "Status": [
+                        "🔒 Secure" if pro_meta["is_ssl"] else "🔓 Insecure",
+                        "⚠️ IP-Masked" if pro_meta["is_ip_masked"] else "✅ Clean",
+                        "⚠️ Suspicious" if feature_weights[5] == 1 else "✅ Clean",
+                        f"{feature_weights[3]} hyphens",
+                        f"{feature_weights[2]} subdomains",
+                        f"{len(redirect_chain) - 1} hops",
+                        f"{whois_info.get('age_days', 'N/A')} days" if whois_info.get('found') else "Unknown",
+                        "🔢 Numeric" if pro_meta["is_ip_masked"] else "📝 Alphanumeric"
+                    ],
+                    "Risk Level": [
+                        "🟢 Low" if pro_meta["is_ssl"] else "🟡 Medium",
+                        "🔴 High" if pro_meta["is_ip_masked"] else "🟢 Low",
+                        "🟡 Medium" if feature_weights[5] == 1 else "🟢 Low",
+                        "🟢 Low" if feature_weights[3] == 0 else "🟡 Medium",
+                        "🟢 Low" if feature_weights[2] < 2 else "🟡 Medium",
+                        "🟢 Low" if len(redirect_chain) < 3 else "🟡 Medium",
+                        "🔴 High" if whois_info.get('age_days', 999) < 30 else "🟢 Low" if whois_info.get('age_days', 0) > 180 else "🟡 Medium",
+                        "🔴 High" if pro_meta["is_ip_masked"] else "🟢 Low"
+                    ]
+                }
+                
+                df_features = pd.DataFrame(features_data)
+                st.dataframe(df_features, use_container_width=True, hide_index=True)
+
+                st.markdown("---")
+
+                # Technical Details
+                st.markdown("#### 🧠 AI & ML Engine Metrics")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown(f"""
+                        <div style="background: rgba(0,255,204,0.02); border: 1px solid rgba(0,255,204,0.05); border-radius: 10px; padding: 1rem;">
+                            <div style="color: #94a3b8; font-size: 0.85rem;">Model Confidence</div>
+                            <div style="color: #00ffcc; font-weight: 700; font-size: 1.2rem;">{round(ml_phish_probability*100, 1)}%</div>
+                            <div style="color: #94a3b8; font-size: 0.8rem;">Structural Deviation Score</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    st.markdown(f"""
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 10px; padding: 1rem;">
+                            <div style="color: #94a3b8; font-size: 0.85rem;">Feature Vector</div>
+                            <div style="color: #e2e8f0; font-weight: 500; font-size: 0.9rem;">{feature_weights}</div>
+                            <div style="color: #94a3b8; font-size: 0.8rem;">[length, @, subdomains, hyphens, entropy, keywords]</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+
+                st.markdown("---")
+
+                # Action Recommendation
+                if is_malicious_class:
+                    st.error("""
+                        🛑 **ACTION REQUIRED:** Our AI engine has detected multiple threat indicators. 
+                        We strongly recommend closing this tab immediately and not proceeding with any 
+                        transactions or data entry on this website.
+                    """)
+                else:
+                    st.success("""
+                        ✅ **SECURITY CLEARANCE:** All security checks passed. This website demonstrates 
+                        legitimate structural patterns and no phishing indicators were detected. 
+                        Safe to proceed.
+                    """)
+
+                st.markdown("---")
+
+                # PRO FEATURE: Downloadable report
+                st.markdown("#### 📥 Export Report")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.download_button(
+                        "📄 Download PDF Report",
+                        data=build_single_scan_pdf(result),
+                        file_name=f"threatx_report_{result['host_domain']}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                with col2:
+                    st.download_button(
+                        "📊 Download CSV Report",
+                        data=build_single_scan_csv(result),
+                        file_name=f"threatx_report_{result['host_domain']}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
             else:
-                st.write("⚪ Geolocation unavailable — server unresolvable or lookup failed.")
-
-            st.write("---")
-
-            # PRO FEATURE: Full WHOIS registration history
-            st.write("#### 📜 Full WHOIS Registration History:")
-            if whois_info.get("found"):
-                st.write(f"📅 **Domain Age Assessment:** {whois_info['age_status']}")
-                w_col1, w_col2 = st.columns(2)
-                with w_col1:
-                    st.write(f"🏛️ **Registrar:** {whois_info['registrar']}")
-                    st.write(f"🆕 **Creation Date:** {whois_info['creation_date']}")
-                    st.write(f"⏳ **Expiration Date:** {whois_info['expiration_date']}")
-                with w_col2:
-                    st.write(f"🔄 **Last Updated:** {whois_info['updated_date']}")
-                    st.write(f"🏢 **Registrant Org:** {whois_info['org']}")
-                    st.write(f"🌐 **Registrant Country:** {whois_info['country']}")
-                if whois_info['name_servers']:
-                    st.write(f"🖥️ **Name Servers:** {', '.join(whois_info['name_servers'][:4])}")
-            else:
-                st.write(f"⚪ {whois_info.get('error', 'WHOIS data unavailable')}")
-
-            st.write("---")
-
-            # PRO FEATURE: Advanced heuristics breakdown table
-            st.write("#### 🔍 Structural Feature Breakdown Table:")
-            breakdown_data = {
-                "Security Parameter Indicator": [
-                    "SSL Protocol Encryption Status",
-                    "Domain Raw IP Address Mask Check",
-                    "Suspicious Login/Verify Keyword Flag",
-                    "URL Hyphen Clustering Matrix",
-                    "Subdomain Layer Count Check",
-                    "Redirect Chain Depth Check",
-                ],
-                "Observed Metric Value": [
-                    "HTTPS Secured" if pro_meta["is_ssl"] == 1 else "Insecure HTTP Standard",
-                    "Masked Raw IP Address Detected" if pro_meta["is_ip_masked"] == 1 else "Legitimate Text String Domain",
-                    "Triggered (Malicious Keywords Found)" if feature_weights[5] == 1 else "Clean Structural Patterns",
-                    f"{feature_weights[3]} Structural Dash Elements Detected",
-                    f"{feature_weights[2]} Segment Subdomains Layered",
-                    f"{len(redirect_chain) - 1} Redirect Hop(s) Detected",
-                ],
-                "Risk Severity Rating": [
-                    "✅ LOW RISK" if pro_meta["is_ssl"] == 1 else "⚠️ MEDIUM RISK ALERT",
-                    "🚨 CRITICAL HIGH RISK" if pro_meta["is_ip_masked"] == 1 else "✅ SECURE INFRASTRUCTURE",
-                    "⚠️ HIGH SUSPICION" if feature_weights[5] == 1 else "✅ SECURE INFRASTRUCTURE",
-                    "⚠️ MINOR ANOMALY" if feature_weights[3] > 0 else "✅ SECURE INFRASTRUCTURE",
-                    "⚠️ MEDIUM SUSPICION" if feature_weights[2] > 1 else "✅ SECURE INFRASTRUCTURE",
-                    "⚠️ MEDIUM SUSPICION" if len(redirect_chain) > 2 else "✅ SECURE INFRASTRUCTURE",
-                ]
-            }
-            st.table(pd.DataFrame(breakdown_data))
-
-            st.write("---")
-            st.write("#### 🧠 Technical System Ingestion Metrics:")
-            st.info(f"**Extracted Live Feature Vector Sequence:** {feature_weights}")
-            st.markdown(f"""
-            - **Random Forest Base Confidence Core:** `{round(ml_phish_probability*100, 1)}% Structural Deviation Weight`
-            - **URL Lexical Parameters Check:** Length: `{feature_weights[0]}` | Subdomains Detected: `{feature_weights[2]}` | Structural Hyphens: `{feature_weights[3]}` | String Entropy: `{feature_weights[4]}`
-            """)
-
-            if is_malicious_class:
-                st.error("🛑 ACTION RECOMMENDED: Our Artificial Intelligence engine recommends closing this tab immediately. The URL demonstrates verified fraudulent design footprints.")
-            else:
-                st.success("✔ SECURITY CLEARANCE GRANTED: This website satisfies all structural security patterns. No phishing behaviors were detected.")
-
-            # PRO FEATURE: Downloadable report
-            st.write("---")
-            st.write("#### 📥 Export This Report:")
-            d_col1, d_col2 = st.columns(2)
-            with d_col1:
-                st.download_button(
-                    "⬇️ Download PDF Report",
-                    data=build_single_scan_pdf(result),
-                    file_name=f"threatx_report_{result['host_domain']}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
-            with d_col2:
-                st.download_button(
-                    "⬇️ Download CSV Report",
-                    data=build_single_scan_csv(result),
-                    file_name=f"threatx_report_{result['host_domain']}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
-        else:
-            st.info("Please provide a valid website address string link to execute security scans.")
+                st.info("⚠️ Please enter a valid website URL to begin the security analysis.")
 
 with tab_bulk:
-    st.write("#### 📂 Bulk URL Scan")
-    st.write("Upload a CSV file with a column named **url** (or **URL**), or paste one link per line below.")
+    st.markdown("### 📂 Bulk URL Scanner")
+    st.markdown("Upload a CSV with a column named **url** or paste URLs below for batch analysis.")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        uploaded_csv = st.file_uploader("📎 Upload CSV File", type=["csv"])
+    
+    with col2:
+        st.markdown("##### or paste URLs manually")
+    
+    pasted_urls = st.text_area(
+        "Enter one URL per line",
+        height=150,
+        placeholder="https://example.com\nhttps://another-site.com",
+        label_visibility="collapsed"
+    )
 
-    uploaded_csv = st.file_uploader("Upload CSV of URLs", type=["csv"])
-    pasted_urls = st.text_area("...or paste URLs here (one per line)", height=150, placeholder="https://example.com\nhttps://another-site.com")
-
-    if st.button("🔍 SCAN ALL URLS"):
+    if st.button("🚀 SCAN ALL URLS", use_container_width=True):
         url_list = []
 
         if uploaded_csv is not None:
@@ -544,21 +1034,24 @@ with tab_bulk:
                     res = scan_url(u)
                     bulk_results.append({
                         "URL": res["input_url"],
-                        "Final URL": res["final_url"],
-                        "Verdict": "⚠️ DANGEROUS" if res["is_malicious_class"] else "✅ SAFE",
+                        "Status": "⚠️ DANGEROUS" if res["is_malicious_class"] else "✅ SAFE",
                         "Risk %": res["risk_percent"],
-                        "Redirect Hops": len(res["redirect_chain"]) - 1,
-                        "Server IP": res["resolved_ip"],
-                        "SSL": "Yes" if res["pro_meta"]["is_ssl"] else "No",
-                        "Domain Age (days)": res["whois_info"].get("age_days", "N/A"),
-                        "Country": res["geo_info"]["country"] if res["geo_info"] else "N/A",
+                        "Final URL": res["final_url"],
+                        "IP": res["resolved_ip"],
+                        "SSL": "🔒" if res["pro_meta"]["is_ssl"] else "🔓",
+                        "Hops": len(res["redirect_chain"]) - 1,
+                        "Age": res["whois_info"].get("age_days", "N/A"),
                     })
                 except Exception as e:
                     bulk_results.append({
-                        "URL": u, "Final URL": "ERROR", "Verdict": "⚪ SCAN FAILED",
-                        "Risk %": "N/A", "Redirect Hops": "N/A", "Server IP": "N/A",
+                        "URL": u, 
+                        "Status": "⚪ FAILED",
+                        "Risk %": "N/A", 
+                        "Final URL": "ERROR",
+                        "IP": "N/A",
                         "SSL": "N/A",
-                        "Domain Age (days)": "N/A", "Country": "N/A",
+                        "Hops": "N/A",
+                        "Age": "N/A",
                     })
                 progress.progress((i + 1) / len(url_list), text=f"Scanning {i + 1} / {len(url_list)}...")
 
@@ -566,24 +1059,46 @@ with tab_bulk:
 
             bulk_df = pd.DataFrame(bulk_results)
 
-            st.write("---")
-            st.write(f"### 📊 Bulk Scan Summary — {len(url_list)} URLs")
+            st.markdown("---")
+            st.markdown(f"### 📊 Bulk Scan Results — {len(url_list)} URLs")
 
-            danger_count = sum(1 for r in bulk_results if r["Verdict"] == "⚠️ DANGEROUS")
-            safe_count = sum(1 for r in bulk_results if r["Verdict"] == "✅ SAFE")
-            failed_count = sum(1 for r in bulk_results if r["Verdict"] == "⚪ SCAN FAILED")
+            # Summary Cards
+            danger_count = sum(1 for r in bulk_results if r["Status"] == "⚠️ DANGEROUS")
+            safe_count = sum(1 for r in bulk_results if r["Status"] == "✅ SAFE")
+            failed_count = sum(1 for r in bulk_results if r["Status"] == "⚪ FAILED")
 
-            s_col1, s_col2, s_col3 = st.columns(3)
-            s_col1.metric("⚠️ Dangerous", danger_count)
-            s_col2.metric("✅ Safe", safe_count)
-            s_col3.metric("⚪ Failed", failed_count)
+            col1, col2, col3 = st.columns(3)
+            col1.markdown(f"""
+                <div style="background: rgba(255,51,51,0.05); border: 1px solid rgba(255,51,51,0.2); border-radius: 12px; padding: 1rem; text-align: center;">
+                    <div style="font-size: 2rem;">⚠️</div>
+                    <div style="color: #ff3333; font-weight: 700; font-size: 1.5rem;">{danger_count}</div>
+                    <div style="color: #94a3b8; font-size: 0.85rem;">Threats Detected</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            col2.markdown(f"""
+                <div style="background: rgba(0,255,204,0.05); border: 1px solid rgba(0,255,204,0.2); border-radius: 12px; padding: 1rem; text-align: center;">
+                    <div style="font-size: 2rem;">✅</div>
+                    <div style="color: #00ffcc; font-weight: 700; font-size: 1.5rem;">{safe_count}</div>
+                    <div style="color: #94a3b8; font-size: 0.85rem;">Verified Secure</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            col3.markdown(f"""
+                <div style="background: rgba(251,191,36,0.05); border: 1px solid rgba(251,191,36,0.2); border-radius: 12px; padding: 1rem; text-align: center;">
+                    <div style="font-size: 2rem;">⚪</div>
+                    <div style="color: #fbbf24; font-weight: 700; font-size: 1.5rem;">{failed_count}</div>
+                    <div style="color: #94a3b8; font-size: 0.85rem;">Scan Failed</div>
+                </div>
+            """, unsafe_allow_html=True)
 
-            st.dataframe(bulk_df, use_container_width=True)
+            st.markdown("---")
+            st.dataframe(bulk_df, use_container_width=True, hide_index=True)
 
             csv_buf = io.StringIO()
             bulk_df.to_csv(csv_buf, index=False)
             st.download_button(
-                "⬇️ Download Bulk Scan Results (CSV)",
+                "📊 Download Bulk Scan Results (CSV)",
                 data=csv_buf.getvalue().encode("utf-8"),
                 file_name="threatx_bulk_scan_results.csv",
                 mime="text/csv",
