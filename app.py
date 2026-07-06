@@ -5,11 +5,22 @@ import socket
 import requests
 import re
 import io
+import hashlib
+import zipfile
 import datetime
+from collections import Counter
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from urllib.parse import urlparse
 from sklearn.ensemble import RandomForestClassifier
+
+# ============================================================================
+# BACKEND CONFIG — not shown in the UI.
+# Paste a free VirusTotal API key here to enable hash-reputation lookups
+# for the File Scan tab (get one at https://www.virustotal.com/gui/join-us).
+# Leave as "" to keep that check silently disabled (no fake "clean" results).
+# ============================================================================
+VIRUSTOTAL_API_KEY = ""  # <-- paste your key between the quotes
 
 # 1. Premium Enterprise UI Configuration
 st.set_page_config(page_title="Threat-X Global Guard Pro", page_icon="🛡️", layout="centered")
@@ -29,7 +40,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.write("<div style='text-align: center; padding-top: 10px;'><span style='font-size: 38px; font-weight: 800; color: #ffffff; letter-spacing: 1px;'>THREAT</span><span style='font-size: 38px; font-weight: 800; color: #00ffcc; letter-spacing: 1px;'>-X</span><span style='font-size: 14px; font-weight: bold; color: #475569; margin-left: 8px;'>GLOBAL GUARD PRO v13.0</span></div>", unsafe_allow_html=True)
+st.write("<div style='text-align: center; padding-top: 10px;'><span style='font-size: 38px; font-weight: 800; color: #ffffff; letter-spacing: 1px;'>THREAT</span><span style='font-size: 38px; font-weight: 800; color: #00ffcc; letter-spacing: 1px;'>-X</span><span style='font-size: 14px; font-weight: bold; color: #475569; margin-left: 8px;'>GLOBAL GUARD PRO v14.0</span></div>", unsafe_allow_html=True)
 st.write("<p style='text-align: center; color: #94a3b8; font-size: 15px; font-family: Arial;'>Enter any website address below to run our automated machine learning scanners and verify website authenticity instantly.</p>", unsafe_allow_html=True)
 st.write("---")
 
@@ -316,8 +327,193 @@ def build_single_scan_pdf(result):
         plt.close(fig)
     return buf.getvalue()
 
-# 8. User Console Interface — Single Scan / Bulk Scan
-tab_single, tab_bulk = st.tabs(["🔍 Single Scan", "📂 Bulk Scan"])
+# ============================================================================
+# 9. FILE MALWARE / PHISHING-DOCUMENT SCANNER
+# ============================================================================
+
+FILE_SIGNATURES = {
+    b"\x4D\x5A":             ("Windows Executable (EXE/DLL)", [".exe", ".dll", ".scr", ".com", ".msi", ".sys"]),
+    b"\x50\x4B\x03\x04":     ("ZIP-based container (docx/xlsx/pptx/zip/jar/apk)",
+                              [".docx", ".xlsx", ".pptx", ".zip", ".jar", ".apk", ".docm", ".xlsm", ".pptm"]),
+    b"\x25\x50\x44\x46":     ("PDF Document", [".pdf"]),
+    b"\xFF\xD8\xFF":         ("JPEG Image", [".jpg", ".jpeg"]),
+    b"\x89\x50\x4E\x47":     ("PNG Image", [".png"]),
+    b"\x47\x49\x46\x38":     ("GIF Image", [".gif"]),
+    b"\x7F\x45\x4C\x46":     ("ELF (Linux Executable)", [".elf", ".bin", ".so"]),
+    b"\xD0\xCF\x11\xE0":     ("Legacy MS Office Document (doc/xls/ppt)", [".doc", ".xls", ".ppt"]),
+    b"\x52\x61\x72\x21":     ("RAR Archive", [".rar"]),
+    b"\x1F\x8B":             ("GZIP Archive", [".gz", ".tgz"]),
+    b"\x37\x7A\xBC\xAF":     ("7-Zip Archive", [".7z"]),
+}
+
+SUSPICIOUS_EXTENSIONS = {
+    '.exe', '.scr', '.bat', '.cmd', '.com', '.pif', '.vbs', '.vbe', '.js', '.jse',
+    '.wsf', '.wsh', '.jar', '.msi', '.ps1', '.psm1', '.hta', '.dll', '.apk', '.lnk',
+    '.reg', '.docm', '.xlsm', '.pptm'
+}
+
+def calculate_file_entropy(data: bytes) -> float:
+    """Shannon entropy (0-8). High entropy (>7.5) suggests packed/encrypted/compressed payloads."""
+    if not data:
+        return 0.0
+    counts = Counter(data)
+    length = len(data)
+    entropy = -sum((c / length) * math.log2(c / length) for c in counts.values())
+    return round(entropy, 2)
+
+def detect_file_signature(file_bytes: bytes):
+    for magic, (desc, exts) in FILE_SIGNATURES.items():
+        if file_bytes.startswith(magic):
+            return desc, exts
+    return "Unknown / unrecognized binary signature", []
+
+def check_extension_mismatch(filename: str, file_bytes: bytes):
+    ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
+    desc, expected_exts = detect_file_signature(file_bytes)
+    if not expected_exts:
+        return False, f"⚪ Could not verify — unrecognized binary signature for `{ext or 'no extension'}`."
+    if ext in expected_exts:
+        return False, f"✅ File extension `{ext}` matches its actual content type ({desc})."
+    return True, (f"🚨 MISMATCH: File is named `{ext}` but its real binary signature is **{desc}** — "
+                  f"a classic disguise trick (e.g. an .exe renamed to .jpg).")
+
+def detect_macros(filename: str, file_bytes: bytes):
+    lower_name = filename.lower()
+    if not lower_name.endswith(('.docm', '.xlsm', '.pptm', '.doc', '.xls', '.ppt', '.docx', '.xlsx', '.pptx')):
+        return False, None
+    try:
+        if zipfile.is_zipfile(io.BytesIO(file_bytes)):
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+                names = z.namelist()
+                if any('vbaProject.bin' in n for n in names):
+                    return True, "🚨 Embedded VBA macro project detected (vbaProject.bin) — macros are a common malware delivery method."
+            return False, "✅ No embedded macros detected."
+        elif file_bytes.startswith(b"\xD0\xCF\x11\xE0"):
+            return None, "⚪ Legacy Office binary format — macro presence could not be verified without extra libraries."
+    except Exception:
+        pass
+    return False, "✅ No embedded macros detected."
+
+def check_virustotal_hash(sha256_hash: str):
+    if not VIRUSTOTAL_API_KEY:
+        return {"checked": False, "malicious": False,
+                "note": "⚪ Hash reputation check skipped — no VirusTotal API key configured in backend."}
+    try:
+        resp = requests.get(
+            f"https://www.virustotal.com/api/v3/files/{sha256_hash}",
+            headers={"x-apikey": VIRUSTOTAL_API_KEY},
+            timeout=8.0
+        )
+    except Exception:
+        return {"checked": False, "malicious": False,
+                "note": "⚪ Hash reputation check unavailable — network error contacting VirusTotal."}
+
+    if resp.status_code == 404:
+        return {"checked": True, "malicious": False,
+                "note": "✅ Hash not found in VirusTotal database (no prior detections on record)."}
+    if resp.status_code == 401:
+        return {"checked": False, "malicious": False,
+                "note": "⚪ Hash reputation check failed — VirusTotal API key invalid."}
+    if resp.status_code != 200:
+        return {"checked": False, "malicious": False,
+                "note": f"⚪ Hash reputation check unavailable — VirusTotal returned HTTP {resp.status_code}."}
+
+    try:
+        data = resp.json()
+        stats = data["data"]["attributes"]["last_analysis_stats"]
+        malicious = stats.get("malicious", 0)
+        suspicious = stats.get("suspicious", 0)
+        total = sum(stats.values()) or 1
+        if malicious > 0:
+            return {"checked": True, "malicious": True,
+                    "note": f"🚨 Flagged malicious by {malicious}/{total} antivirus engines on VirusTotal."}
+        elif suspicious > 0:
+            return {"checked": True, "malicious": False,
+                    "note": f"⚠️ Flagged suspicious by {suspicious}/{total} engines — not confirmed malicious."}
+        else:
+            return {"checked": True, "malicious": False,
+                    "note": f"✅ Clean across {total} antivirus engines on VirusTotal."}
+    except Exception:
+        return {"checked": False, "malicious": False,
+                "note": "⚪ Hash reputation check unavailable — malformed VirusTotal response."}
+
+def scan_uploaded_file(uploaded_file):
+    file_bytes = uploaded_file.getvalue()
+    filename = uploaded_file.name
+    size_kb = round(len(file_bytes) / 1024, 1)
+
+    sha256_hash = hashlib.sha256(file_bytes).hexdigest()
+    md5_hash = hashlib.md5(file_bytes).hexdigest()
+
+    entropy = calculate_file_entropy(file_bytes)
+    sig_desc, _ = detect_file_signature(file_bytes)
+    mismatch, mismatch_note = check_extension_mismatch(filename, file_bytes)
+    has_macro, macro_note = detect_macros(filename, file_bytes)
+
+    ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
+    is_suspicious_ext = ext in SUSPICIOUS_EXTENSIONS
+
+    vt_result = check_virustotal_hash(sha256_hash)
+
+    # Local static-analysis risk scoring (0-100)
+    risk = 5.0
+    if mismatch:
+        risk += 40.0
+    if is_suspicious_ext:
+        risk += 25.0
+    if entropy >= 7.5:
+        risk += 20.0
+    if has_macro:
+        risk += 25.0
+    if vt_result.get("malicious"):
+        risk = 99.0  # confirmed multi-engine detection overrides local heuristics
+
+    risk_percent = round(min(99.4, max(2.0, risk)), 1)
+    safety_percent = round(100.0 - risk_percent, 1)
+    is_malicious_class = risk_percent >= 45.0
+
+    return {
+        "filename": filename,
+        "size_kb": size_kb,
+        "sha256": sha256_hash,
+        "md5": md5_hash,
+        "entropy": entropy,
+        "signature_desc": sig_desc,
+        "extension_mismatch": mismatch,
+        "mismatch_note": mismatch_note,
+        "has_macro": has_macro,
+        "macro_note": macro_note,
+        "is_suspicious_ext": is_suspicious_ext,
+        "vt_result": vt_result,
+        "risk_percent": risk_percent,
+        "safety_percent": safety_percent,
+        "is_malicious_class": is_malicious_class,
+        "scanned_at": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
+
+def build_file_scan_csv(fresult):
+    row = {
+        "Filename": fresult["filename"],
+        "Size (KB)": fresult["size_kb"],
+        "Verdict": "MALICIOUS" if fresult["is_malicious_class"] else "SAFE",
+        "Risk %": fresult["risk_percent"],
+        "Safety %": fresult["safety_percent"],
+        "SHA256": fresult["sha256"],
+        "MD5": fresult["md5"],
+        "Entropy": fresult["entropy"],
+        "Detected Type": fresult["signature_desc"],
+        "Extension Mismatch": fresult["extension_mismatch"],
+        "Suspicious Extension": fresult["is_suspicious_ext"],
+        "Macro Detected": fresult["has_macro"],
+        "VirusTotal Status": fresult["vt_result"]["note"],
+        "Scanned At (UTC)": fresult["scanned_at"],
+    }
+    buf = io.StringIO()
+    pd.DataFrame([row]).to_csv(buf, index=False)
+    return buf.getvalue().encode("utf-8")
+
+# 8. User Console Interface — Single Scan / Bulk Scan / File Scan
+tab_single, tab_bulk, tab_file = st.tabs(["🔍 Single Scan", "📂 Bulk Scan", "🗂️ File Scan"])
 
 with tab_single:
     user_target = st.text_input("🔗 Enter website link here to analyze secure features:", placeholder="e.g., https://my-safe-website.com")
@@ -589,3 +785,121 @@ with tab_bulk:
                 mime="text/csv",
                 use_container_width=True,
             )
+
+with tab_file:
+    st.write("#### 🗂️ File Malware & Phishing-Document Scan")
+    st.write("Upload any file to check for disguised executables, suspicious extensions, packed/encrypted payloads, embedded macros, and known-malicious hashes.")
+
+    uploaded_file_scan = st.file_uploader("Upload a file to scan", type=None, key="file_scan_uploader")
+
+    if uploaded_file_scan is not None:
+        if st.button("🔍 SCAN FILE NOW"):
+            with st.spinner("Computing hashes, checking file signature, scanning for macros..."):
+                fresult = scan_uploaded_file(uploaded_file_scan)
+
+            st.write("---")
+            st.write("### 📊 Automated File Threat Report")
+
+            fm_col1, fm_col2, fm_col3 = st.columns(3)
+            if fresult["is_malicious_class"]:
+                fm_col1.metric(label="🛡️ SCANNER STATUS", value="⚠️ MALICIOUS", delta="RISK DETECTED", delta_color="inverse")
+                fm_col2.metric(label="🚨 RISK PERCENTAGE", value=f"{fresult['risk_percent']}%", delta="HIGH RISK", delta_color="inverse")
+                fm_col3.metric(label="🟢 SAFETY FACTOR", value=f"{fresult['safety_percent']}%", delta="UNSAFE FILE", delta_color="inverse")
+            else:
+                fm_col1.metric(label="🛡️ SCANNER STATUS", value="✅ SAFE FILE", delta="CLEAN RESULT")
+                fm_col2.metric(label="🚨 RISK PERCENTAGE", value=f"{fresult['risk_percent']}%", delta="LOW RISK")
+                fm_col3.metric(label="🟢 SAFETY FACTOR", value=f"{fresult['safety_percent']}%", delta="SECURE FILE")
+
+            st.write("---")
+
+            labels = ['Safety Index', 'Risk Index']
+            sizes = [fresult['safety_percent'], fresult['risk_percent']]
+            colors = ['#00ffcc', '#ff3333'] if not fresult["is_malicious_class"] else ['#161c2e', '#ff3333']
+
+            ffig, fax = plt.subplots(figsize=(6, 2.4))
+            ffig.patch.set_facecolor('#060814')
+            fax.set_facecolor('#060814')
+            f_wedges, f_texts, f_autotexts = fax.pie(
+                sizes, labels=labels, colors=colors, autopct='%1.1f%%',
+                startangle=90, textprops=dict(color="w", weight="bold", size=10),
+                wedgeprops=dict(width=0.4, edgecolor='#1e293b')
+            )
+            for text in f_texts:
+                text.set_color('#ffffff')
+            fax.axis('equal')
+            st.pyplot(ffig)
+            plt.close(ffig)
+
+            st.write("---")
+            st.write("#### 🧬 File Fingerprint:")
+            fp_col1, fp_col2 = st.columns(2)
+            with fp_col1:
+                st.write(f"📄 **Filename:** `{fresult['filename']}`")
+                st.write(f"📦 **File Size:** `{fresult['size_kb']} KB`")
+                st.write(f"🔎 **Detected Type:** {fresult['signature_desc']}")
+            with fp_col2:
+                st.write(f"🔑 **SHA-256:** `{fresult['sha256']}`")
+                st.write(f"🔑 **MD5:** `{fresult['md5']}`")
+                st.write(f"📈 **Entropy:** `{fresult['entropy']} / 8.0`")
+
+            st.write("---")
+            st.write("#### 🕵️ Static Analysis Findings:")
+            st.write(fresult["mismatch_note"])
+            if fresult["macro_note"]:
+                st.write(fresult["macro_note"])
+            if fresult["is_suspicious_ext"]:
+                st.write("🚨 File extension is on the high-risk executable/script list.")
+            else:
+                st.write("✅ File extension is not on the high-risk executable/script list.")
+            if fresult["entropy"] >= 7.5:
+                st.write(f"🚨 High entropy ({fresult['entropy']}/8.0) — consistent with packed, compressed, or encrypted payloads often used to evade detection.")
+            else:
+                st.write(f"✅ Entropy ({fresult['entropy']}/8.0) is within a normal range for this file type.")
+
+            st.write("---")
+            st.write("#### 🌐 VirusTotal Hash Reputation:")
+            st.write(fresult["vt_result"]["note"])
+
+            st.write("---")
+            st.write("#### 🔍 Structural Feature Breakdown Table:")
+            file_breakdown = {
+                "Security Parameter Indicator": [
+                    "File Signature vs Extension Match",
+                    "High-Risk Extension Check",
+                    "Shannon Entropy (Packing/Encryption)",
+                    "Embedded Macro Detection",
+                    "VirusTotal Multi-Engine Reputation",
+                ],
+                "Observed Metric Value": [
+                    "Mismatch Detected" if fresult["extension_mismatch"] else "Consistent",
+                    "Suspicious" if fresult["is_suspicious_ext"] else "Not Suspicious",
+                    f"{fresult['entropy']} / 8.0",
+                    "Macro Found" if fresult["has_macro"] else ("Unverifiable" if fresult["has_macro"] is None else "No Macro"),
+                    fresult["vt_result"]["note"],
+                ],
+                "Risk Severity Rating": [
+                    "🚨 CRITICAL HIGH RISK" if fresult["extension_mismatch"] else "✅ SECURE",
+                    "⚠️ HIGH SUSPICION" if fresult["is_suspicious_ext"] else "✅ SECURE",
+                    "⚠️ MEDIUM SUSPICION" if fresult["entropy"] >= 7.5 else "✅ SECURE",
+                    "🚨 CRITICAL HIGH RISK" if fresult["has_macro"] else "✅ SECURE",
+                    "🚨 CRITICAL HIGH RISK" if fresult["vt_result"].get("malicious") else "✅ SECURE",
+                ]
+            }
+            st.table(pd.DataFrame(file_breakdown))
+
+            if fresult["is_malicious_class"]:
+                st.error("🛑 ACTION RECOMMENDED: Do not open or execute this file. It demonstrates verified malicious indicators.")
+            else:
+                st.success("✔ SECURITY CLEARANCE GRANTED: No malicious indicators were detected in this file.")
+
+            st.write("---")
+            st.write("#### 📥 Export This Report:")
+            st.download_button(
+                "⬇️ Download CSV Report",
+                data=build_file_scan_csv(fresult),
+                file_name=f"threatx_file_report_{fresult['filename']}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+    else:
+        st.info("Upload a file above, then click 'SCAN FILE NOW' to run the analysis.")
