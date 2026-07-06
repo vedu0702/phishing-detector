@@ -14,14 +14,6 @@ from matplotlib.backends.backend_pdf import PdfPages
 from urllib.parse import urlparse
 from sklearn.ensemble import RandomForestClassifier
 
-# ============================================================================
-# BACKEND CONFIG — not shown in the UI.
-# Paste a free VirusTotal API key here to enable hash-reputation lookups
-# for the File Scan tab (get one at https://www.virustotal.com/gui/join-us).
-# Leave as "" to keep that check silently disabled (no fake "clean" results).
-# ============================================================================
-VIRUSTOTAL_API_KEY = ""  # <-- paste your key between the quotes
-
 # 1. Premium Enterprise UI Configuration
 st.set_page_config(page_title="Threat-X Global Guard Pro", page_icon="🛡️", layout="centered")
 
@@ -394,49 +386,6 @@ def detect_macros(filename: str, file_bytes: bytes):
         pass
     return False, "✅ No embedded macros detected."
 
-def check_virustotal_hash(sha256_hash: str):
-    if not VIRUSTOTAL_API_KEY:
-        return {"checked": False, "malicious": False,
-                "note": "⚪ Hash reputation check skipped — no VirusTotal API key configured in backend."}
-    try:
-        resp = requests.get(
-            f"https://www.virustotal.com/api/v3/files/{sha256_hash}",
-            headers={"x-apikey": VIRUSTOTAL_API_KEY},
-            timeout=8.0
-        )
-    except Exception:
-        return {"checked": False, "malicious": False,
-                "note": "⚪ Hash reputation check unavailable — network error contacting VirusTotal."}
-
-    if resp.status_code == 404:
-        return {"checked": True, "malicious": False,
-                "note": "✅ Hash not found in VirusTotal database (no prior detections on record)."}
-    if resp.status_code == 401:
-        return {"checked": False, "malicious": False,
-                "note": "⚪ Hash reputation check failed — VirusTotal API key invalid."}
-    if resp.status_code != 200:
-        return {"checked": False, "malicious": False,
-                "note": f"⚪ Hash reputation check unavailable — VirusTotal returned HTTP {resp.status_code}."}
-
-    try:
-        data = resp.json()
-        stats = data["data"]["attributes"]["last_analysis_stats"]
-        malicious = stats.get("malicious", 0)
-        suspicious = stats.get("suspicious", 0)
-        total = sum(stats.values()) or 1
-        if malicious > 0:
-            return {"checked": True, "malicious": True,
-                    "note": f"🚨 Flagged malicious by {malicious}/{total} antivirus engines on VirusTotal."}
-        elif suspicious > 0:
-            return {"checked": True, "malicious": False,
-                    "note": f"⚠️ Flagged suspicious by {suspicious}/{total} engines — not confirmed malicious."}
-        else:
-            return {"checked": True, "malicious": False,
-                    "note": f"✅ Clean across {total} antivirus engines on VirusTotal."}
-    except Exception:
-        return {"checked": False, "malicious": False,
-                "note": "⚪ Hash reputation check unavailable — malformed VirusTotal response."}
-
 def scan_uploaded_file(uploaded_file):
     file_bytes = uploaded_file.getvalue()
     filename = uploaded_file.name
@@ -453,8 +402,6 @@ def scan_uploaded_file(uploaded_file):
     ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
     is_suspicious_ext = ext in SUSPICIOUS_EXTENSIONS
 
-    vt_result = check_virustotal_hash(sha256_hash)
-
     # Local static-analysis risk scoring (0-100)
     risk = 5.0
     if mismatch:
@@ -465,8 +412,6 @@ def scan_uploaded_file(uploaded_file):
         risk += 20.0
     if has_macro:
         risk += 25.0
-    if vt_result.get("malicious"):
-        risk = 99.0  # confirmed multi-engine detection overrides local heuristics
 
     risk_percent = round(min(99.4, max(2.0, risk)), 1)
     safety_percent = round(100.0 - risk_percent, 1)
@@ -484,7 +429,6 @@ def scan_uploaded_file(uploaded_file):
         "has_macro": has_macro,
         "macro_note": macro_note,
         "is_suspicious_ext": is_suspicious_ext,
-        "vt_result": vt_result,
         "risk_percent": risk_percent,
         "safety_percent": safety_percent,
         "is_malicious_class": is_malicious_class,
@@ -505,7 +449,6 @@ def build_file_scan_csv(fresult):
         "Extension Mismatch": fresult["extension_mismatch"],
         "Suspicious Extension": fresult["is_suspicious_ext"],
         "Macro Detected": fresult["has_macro"],
-        "VirusTotal Status": fresult["vt_result"]["note"],
         "Scanned At (UTC)": fresult["scanned_at"],
     }
     buf = io.StringIO()
@@ -857,10 +800,6 @@ with tab_file:
                 st.write(f"✅ Entropy ({fresult['entropy']}/8.0) is within a normal range for this file type.")
 
             st.write("---")
-            st.write("#### 🌐 VirusTotal Hash Reputation:")
-            st.write(fresult["vt_result"]["note"])
-
-            st.write("---")
             st.write("#### 🔍 Structural Feature Breakdown Table:")
             file_breakdown = {
                 "Security Parameter Indicator": [
@@ -868,21 +807,18 @@ with tab_file:
                     "High-Risk Extension Check",
                     "Shannon Entropy (Packing/Encryption)",
                     "Embedded Macro Detection",
-                    "VirusTotal Multi-Engine Reputation",
                 ],
                 "Observed Metric Value": [
                     "Mismatch Detected" if fresult["extension_mismatch"] else "Consistent",
                     "Suspicious" if fresult["is_suspicious_ext"] else "Not Suspicious",
                     f"{fresult['entropy']} / 8.0",
                     "Macro Found" if fresult["has_macro"] else ("Unverifiable" if fresult["has_macro"] is None else "No Macro"),
-                    fresult["vt_result"]["note"],
                 ],
                 "Risk Severity Rating": [
                     "🚨 CRITICAL HIGH RISK" if fresult["extension_mismatch"] else "✅ SECURE",
                     "⚠️ HIGH SUSPICION" if fresult["is_suspicious_ext"] else "✅ SECURE",
                     "⚠️ MEDIUM SUSPICION" if fresult["entropy"] >= 7.5 else "✅ SECURE",
                     "🚨 CRITICAL HIGH RISK" if fresult["has_macro"] else "✅ SECURE",
-                    "🚨 CRITICAL HIGH RISK" if fresult["vt_result"].get("malicious") else "✅ SECURE",
                 ]
             }
             st.table(pd.DataFrame(file_breakdown))
