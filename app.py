@@ -263,23 +263,71 @@ def check_cert_transparency(hostname):
     return {"found": False, "status": "⚪ Certificate Transparency lookup unavailable"}
 
 # 4c. Redirect Chain Tracer — follows shorteners/redirect hops to the real final page
+def _extract_client_side_redirect(html_text, base_url):
+    """
+    HTTP-level redirects (3xx) are only half the story. Many phishing kits use
+    a client-side bounce instead — a <meta http-equiv="refresh"> tag or a
+    window.location JS assignment — specifically because these are invisible
+    to tools that only follow HTTP status codes. This looks for both.
+    """
+    from urllib.parse import urljoin
+
+    # <meta http-equiv="refresh" content="0;url=https://real-target.com">
+    meta_match = re.search(
+        r'<meta[^>]+http-equiv=["\']?refresh["\']?[^>]+content=["\']?\s*\d+\s*;\s*url\s*=\s*([^"\'>\s]+)',
+        html_text, re.IGNORECASE
+    )
+    if meta_match:
+        return urljoin(base_url, meta_match.group(1).strip())
+
+    # window.location = "..." / window.location.href = "..." / location.replace("...")
+    js_match = re.search(
+        r'(?:window\.location(?:\.href)?\s*=\s*|location\.replace\s*\(\s*)["\']([^"\']+)["\']',
+        html_text, re.IGNORECASE
+    )
+    if js_match:
+        return urljoin(base_url, js_match.group(1).strip())
+
+    return None
+
 def trace_redirect_chain(url, max_hops=10):
     """
-    Follows HTTP redirects (bit.ly, tinyurl, tracking hops, etc.) and returns
-    the full chain of URLs plus the final resolved destination URL.
+    Follows BOTH HTTP redirects (3xx — bit.ly, tinyurl, tracking hops, etc.)
+    AND client-side redirects (meta-refresh / JS window.location), which
+    plain HTTP-following misses entirely. Returns the full chain plus the
+    true final destination.
     """
     chain = [url]
+    current_url = url
+    visited = set()
+
     try:
-        resp = requests.get(
-            url, timeout=6.0, allow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (ThreatX-Scanner)"},
-            stream=True
-        )
-        resp.close()
-        if resp.history:
-            chain = [h.url for h in resp.history] + [resp.url]
-        else:
-            chain = [resp.url]
+        for _ in range(max_hops):
+            if current_url in visited:
+                break  # redirect loop protection
+            visited.add(current_url)
+
+            resp = requests.get(
+                current_url, timeout=6.0, allow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0 (ThreatX-Scanner)"}
+            )
+
+            for h in resp.history:
+                if h.url not in chain:
+                    chain.append(h.url)
+            if resp.url not in chain:
+                chain.append(resp.url)
+            current_url = resp.url
+
+            content_type = resp.headers.get("Content-Type", "")
+            if "text/html" in content_type.lower():
+                client_target = _extract_client_side_redirect(resp.text, resp.url)
+                if client_target and client_target != current_url and client_target not in chain:
+                    chain.append(client_target)
+                    current_url = client_target
+                    continue  # follow this next hop too
+            break  # no further redirect found — this is the true final page
+
         return chain[:max_hops], chain[-1]
     except Exception:
         # Could not follow redirects (dead link, blocked, etc.) — scan original URL as-is
@@ -730,22 +778,6 @@ with tab_single:
                 st.write(f"📝 **URLhaus:** {urlhaus_result['status']}")
             with tf_col2:
                 st.write(f"🌐 **Google Safe Browsing:** {gsb_result['status']}")
-
-            with st.expander("🔧 Developer Diagnostics — did each live check actually run?"):
-                st.caption(
-                    "This panel exists so you (the site owner) can tell the difference between "
-                    "'genuinely clean' and 'the check silently failed.' A failed check never adds "
-                    "risk points, so an unusually high safe rate can hide here."
-                )
-                diag_col1, diag_col2 = st.columns(2)
-                with diag_col1:
-                    st.write(f"URLhaus reachable: {'✅ Yes' if urlhaus_result.get('checked') else '❌ No / errored'}")
-                    st.write(f"GSB key detected: {'✅ Yes' if gsb_api_key else '❌ No key configured'}")
-                    st.write(f"GSB check completed: {'✅ Yes' if gsb_result.get('checked') else '❌ No / errored'}")
-                with diag_col2:
-                    st.write(f"WHOIS/RDAP record found: {'✅ Yes' if whois_info.get('found') else '❌ No'}")
-                    st.write(f"Cert Transparency data found: {'✅ Yes' if result['cert_info'].get('found') else '❌ No'}")
-                    st.write(f"DNS resolved: {'✅ Yes' if resolved_ip != '0.0.0.0' else '❌ No'}")
 
             st.write("---")
 
