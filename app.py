@@ -56,6 +56,48 @@ def compile_advanced_ml_model():
 
 cyber_classifier = compile_advanced_ml_model()
 
+# 3. Live URLhaus Threat-Feed Check (free, no key required)
+def check_past_phishing_history(target_url):
+    try:
+        response = requests.post(
+            "https://urlhaus-api.abuse.ch/v1/url/",
+            data={'url': target_url},
+            timeout=4.0
+        )
+        if response.status_code == 200:
+            res_data = response.json()
+            if res_data.get('query_status') == 'ok':
+                return True, f"Reported scam listed in Global Blocklist databases (Class: {res_data.get('threat')})"
+    except Exception:
+        pass
+    return False, "Clean record: No active historical threats listed inside open intelligence repositories."
+
+# 3b. Google Safe Browsing Check (optional, needs a free API key)
+def check_google_safe_browsing(target_url, api_key):
+    if not api_key:
+        return {"checked": False, "matched": False, "status": "⚪ Skipped — no API key provided"}
+    try:
+        body = {
+            "client": {"clientId": "threat-x-global-guard", "clientVersion": "14.0"},
+            "threatInfo": {
+                "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+                "platformTypes": ["ANY_PLATFORM"],
+                "threatEntryTypes": ["URL"],
+                "threatEntries": [{"url": target_url}]
+            }
+        }
+        resp = requests.post(f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={api_key}",
+                              json=body, timeout=6)
+        if resp.status_code == 200:
+            matches = resp.json().get("matches", [])
+            if matches:
+                types = ", ".join(sorted({m.get("threatType", "?") for m in matches}))
+                return {"checked": True, "matched": True, "status": f"🔴 Google Safe Browsing MATCH — {types}"}
+            return {"checked": True, "matched": False, "status": "🟢 Clean — no match on Google Safe Browsing"}
+        return {"checked": False, "matched": False, "status": f"⚪ API error (HTTP {resp.status_code})"}
+    except Exception:
+        return {"checked": False, "matched": False, "status": "⚪ Google Safe Browsing request failed"}
+
 # 4. Live DNS Host Resolver + IP Geolocation
 def resolve_live_dns_ip(hostname):
     try:
@@ -66,73 +108,93 @@ def resolve_live_dns_ip(hostname):
         return "0.0.0.0", "🔴 Inactive / Blocked Server"
 
 def resolve_geolocation(ip_address):
-    """Live IP geolocation via ip-api.com (free, no key required)"""
+    """Live IP geolocation via ipapi.co — pure HTTPS, works reliably on Streamlit Community Cloud"""
     if ip_address == "0.0.0.0":
         return None
     try:
-        resp = requests.get(f"http://ip-api.com/json/{ip_address}", timeout=4.0)
+        resp = requests.get(f"https://ipapi.co/{ip_address}/json/", timeout=5.0,
+                             headers={"User-Agent": "threat-x-global-guard"})
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("status") == "success":
+            if not data.get("error"):
                 return {
-                    "country": data.get("country", "Unknown"),
-                    "region": data.get("regionName", "Unknown"),
+                    "country": data.get("country_name", "Unknown"),
+                    "region": data.get("region", "Unknown"),
                     "city": data.get("city", "Unknown"),
-                    "isp": data.get("isp", "Unknown"),
+                    "isp": data.get("org", "Unknown"),
                     "org": data.get("org", "Unknown"),
-                    "lat": data.get("lat"),
-                    "lon": data.get("lon"),
+                    "lat": data.get("latitude"),
+                    "lon": data.get("longitude"),
                     "timezone": data.get("timezone", "Unknown")
                 }
     except Exception:
         pass
     return None
 
-# 4b. Live WHOIS Domain Registration Lookup (no key required)
-def resolve_whois_record(hostname):
-    """Live WHOIS lookup — registrar, creation/expiry dates, name servers"""
+# 4b. Live Domain Registration Lookup via RDAP (no key, pure HTTPS — reliable on Streamlit Cloud)
+def _base_domain_candidates(hostname):
+    parts = hostname.split('.')
+    candidates = [hostname]
+    if len(parts) > 2:
+        candidates.append('.'.join(parts[-2:]))
+    return candidates
+
+def _parse_rdap_date(value):
+    if not value:
+        return None
     try:
-        import whois  # python-whois package
-        w = whois.whois(hostname)
-
-        def first(value):
-            if isinstance(value, list):
-                return value[0] if value else None
-            return value
-
-        created = first(w.creation_date)
-        expires = first(w.expiration_date)
-        updated = first(w.updated_date)
-
-        age_days = None
-        if isinstance(created, datetime.datetime):
-            age_days = (datetime.datetime.utcnow() - created.replace(tzinfo=None)).days
-
-        if age_days is None:
-            age_status = "⚪ Registration date unavailable"
-        elif age_days < 30:
-            age_status = f"🔴 Very new domain — registered {age_days} days ago (common phishing trait)"
-        elif age_days < 180:
-            age_status = f"🟠 Recently registered — {age_days} days ago"
-        else:
-            age_status = f"🟢 Established domain — {age_days} days old"
-
-        return {
-            "found": True,
-            "registrar": w.registrar or "Unknown",
-            "creation_date": str(created) if created else "Unknown",
-            "expiration_date": str(expires) if expires else "Unknown",
-            "updated_date": str(updated) if updated else "Unknown",
-            "name_servers": w.name_servers if w.name_servers else [],
-            "org": getattr(w, "org", None) or "Not disclosed",
-            "country": getattr(w, "country", None) or "Not disclosed",
-            "age_days": age_days,
-            "age_status": age_status
-        }
-    except ImportError:
-        return {"found": False, "error": "python-whois not installed (pip install python-whois)"}
+        return datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
     except Exception:
-        return {"found": False, "error": "WHOIS lookup failed — record may be privacy-protected or registry unreachable"}
+        return None
+
+def resolve_whois_record(hostname):
+    """Live domain registration lookup via RDAP (rdap.org bootstrap) — HTTPS only, no raw sockets."""
+    for candidate in _base_domain_candidates(hostname):
+        try:
+            resp = requests.get(f"https://rdap.org/domain/{candidate}", timeout=6,
+                                 headers={"Accept": "application/rdap+json"})
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+
+            events = {e.get("eventAction"): e.get("eventDate") for e in data.get("events", [])}
+            created = _parse_rdap_date(events.get("registration"))
+            expires = _parse_rdap_date(events.get("expiration"))
+            updated = _parse_rdap_date(events.get("last changed") or events.get("last update of RDAP database"))
+
+            registrar = "Unknown"
+            for entity in data.get("entities", []):
+                if "registrar" in entity.get("roles", []):
+                    vcard = entity.get("vcardArray")
+                    if vcard and len(vcard) > 1:
+                        for field in vcard[1]:
+                            if field[0] == "fn":
+                                registrar = field[3]
+                                break
+
+            name_servers = [ns.get("ldhName") for ns in data.get("nameservers", []) if ns.get("ldhName")]
+            age_days = (datetime.datetime.now(datetime.timezone.utc) - created).days if created else None
+
+            if age_days is None:
+                age_status = "⚪ Registration date unavailable"
+            elif age_days < 30:
+                age_status = f"🔴 Very new domain — registered {age_days} days ago (common phishing trait)"
+            elif age_days < 180:
+                age_status = f"🟠 Recently registered — {age_days} days ago"
+            else:
+                age_status = f"🟢 Established domain — {age_days} days old"
+
+            return {
+                "found": True, "registrar": registrar,
+                "creation_date": str(created) if created else "Unknown",
+                "expiration_date": str(expires) if expires else "Unknown",
+                "updated_date": str(updated) if updated else "Unknown",
+                "name_servers": name_servers, "org": registrar, "country": data.get("country", "Not disclosed"),
+                "age_days": age_days, "age_status": age_status
+            }
+        except Exception:
+            continue
+    return {"found": False, "error": "No RDAP record found — domain may be unregistered, or registry unreachable"}
 
 # 4c. Redirect Chain Tracer — follows shorteners/redirect hops to the real final page
 def trace_redirect_chain(url, max_hops=10):
@@ -213,7 +275,7 @@ def extract_lexical_vectors(url):
     return features, host, pro_heuristics
 
 # 6. Unified scan pipeline — used by both Single Scan and Bulk Scan
-def scan_url(user_target):
+def scan_url(user_target, gsb_key=None):
     original_url = user_target if user_target.startswith(('http://', 'https://')) else 'http://' + user_target
 
     redirect_chain, final_url = trace_redirect_chain(original_url)
@@ -224,6 +286,8 @@ def scan_url(user_target):
     resolved_ip, dns_status_log = resolve_live_dns_ip(host_domain)
     geo_info = resolve_geolocation(resolved_ip)
     whois_info = resolve_whois_record(host_domain)
+    has_scam_history, history_log_msg = check_past_phishing_history(final_url)
+    gsb_result = check_google_safe_browsing(final_url, gsb_key)
 
     eval_dataframe = pd.DataFrame([feature_weights], columns=['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token'])
     ml_probabilities = cyber_classifier.predict_proba(eval_dataframe)
@@ -243,6 +307,10 @@ def scan_url(user_target):
             dynamic_risk_weight += 8.0
     if domain_drift:
         dynamic_risk_weight += 20.0
+    if has_scam_history:
+        dynamic_risk_weight += 30.0
+    if gsb_result.get("matched"):
+        dynamic_risk_weight += 45.0
 
     risk_percent = round(min(99.4, max(4.2, dynamic_risk_weight)), 1)
     safety_percent = round(100.0 - risk_percent, 1)
@@ -262,6 +330,9 @@ def scan_url(user_target):
         "dns_status_log": dns_status_log,
         "geo_info": geo_info,
         "whois_info": whois_info,
+        "has_scam_history": has_scam_history,
+        "history_log_msg": history_log_msg,
+        "gsb_result": gsb_result,
         "ml_phish_probability": ml_phish_probability,
         "risk_percent": risk_percent,
         "safety_percent": safety_percent,
@@ -283,6 +354,8 @@ def build_single_scan_csv(result):
         "DNS Status": result["dns_status_log"],
         "SSL": "Yes" if result["pro_meta"]["is_ssl"] else "No",
         "IP-Masked Domain": "Yes" if result["pro_meta"]["is_ip_masked"] else "No",
+        "URLhaus Match": result["has_scam_history"],
+        "Google Safe Browsing Match": result["gsb_result"].get("matched", False),
         "Domain Age (days)": (result["whois_info"].get("age_days")
                               if result["whois_info"].get("age_days") is not None else "N/A"),
         "Registrar": result["whois_info"].get("registrar", "N/A"),
@@ -312,6 +385,10 @@ def build_single_scan_pdf(result):
             f"VERDICT: {verdict}",
             f"Risk Score:   {result['risk_percent']}%",
             f"Safety Score: {result['safety_percent']}%",
+            "",
+            "-- Threat Intelligence --",
+            f"URLhaus:              {result['history_log_msg']}",
+            f"Google Safe Browsing:  {result['gsb_result']['status']}",
             "",
             "-- Network --",
             f"Server IP:    {result['resolved_ip']}  ({result['dns_status_log']})",
@@ -490,7 +567,19 @@ def build_file_scan_csv(fresult):
     pd.DataFrame([row]).to_csv(buf, index=False)
     return buf.getvalue().encode("utf-8")
 
-# 8. User Console Interface — Single Scan / Bulk Scan / File Scan
+# 8. Google Safe Browsing key — read from server-side secrets, never shown to end users.
+#    Configure this in Streamlit Cloud: App settings -> Secrets -> add:
+#        GSB_API_KEY = "your-google-safe-browsing-key-here"
+#    If no key is configured, GSB checks are silently skipped (URLhaus/WHOIS/DNS/Geo still run).
+def get_gsb_api_key():
+    try:
+        return st.secrets.get("GSB_API_KEY", "")
+    except Exception:
+        return ""
+
+gsb_api_key = get_gsb_api_key()
+
+# 8b. User Console Interface — Single Scan / Bulk Scan / File Scan
 tab_single, tab_bulk, tab_file = st.tabs(["🔍 Single Scan", "📂 Bulk Scan", "🗂️ File Scan"])
 
 with tab_single:
@@ -498,8 +587,8 @@ with tab_single:
 
     if st.button("🔍 SCAN WEBSITE NOW"):
         if user_target:
-            with st.spinner("Tracing redirects, analyzing server protocols and WHOIS records..."):
-                result = scan_url(user_target)
+            with st.spinner("Tracing redirects, checking threat feeds, WHOIS and geolocation..."):
+                result = scan_url(user_target, gsb_key=gsb_api_key)
 
             risk_percent = result["risk_percent"]
             safety_percent = result["safety_percent"]
@@ -514,6 +603,9 @@ with tab_single:
             cross_domain_hops = result["cross_domain_hops"]
             domain_drift = result["domain_drift"]
             ml_phish_probability = result["ml_phish_probability"]
+            has_scam_history = result["has_scam_history"]
+            history_log_msg = result["history_log_msg"]
+            gsb_result = result["gsb_result"]
 
             # METRICS & ANALYSIS DASHBOARD
             st.write("---")
@@ -548,6 +640,16 @@ with tab_single:
             ax.axis('equal')
             st.pyplot(fig_pie)
             plt.close(fig_pie)
+
+            st.write("---")
+
+            # PRO FEATURE: Live Threat Feed Results
+            st.write("#### 📡 Live Threat Feed Results:")
+            tf_col1, tf_col2 = st.columns(2)
+            with tf_col1:
+                st.write(f"📝 **URLhaus:** :{'red[MATCH — ' + history_log_msg + ']' if has_scam_history else 'green[' + history_log_msg + ']'}")
+            with tf_col2:
+                st.write(f"🌐 **Google Safe Browsing:** {gsb_result['status']}")
 
             st.write("---")
 
@@ -729,7 +831,7 @@ with tab_bulk:
 
             for i, u in enumerate(url_list):
                 try:
-                    res = scan_url(u)
+                    res = scan_url(u, gsb_key=gsb_api_key)
                     bulk_results.append({
                         "URL": res["input_url"],
                         "Final URL": res["final_url"],
@@ -737,6 +839,8 @@ with tab_bulk:
                         "Risk %": res["risk_percent"],
                         "Redirect Hops (Total)": len(res["redirect_chain"]) - 1,
                         "Redirect Hops (Cross-Domain)": res["cross_domain_hops"],
+                        "URLhaus Match": res["has_scam_history"],
+                        "GSB Match": res["gsb_result"].get("matched", False),
                         "Server IP": res["resolved_ip"],
                         "SSL": "Yes" if res["pro_meta"]["is_ssl"] else "No",
                         "Domain Age (days)": (res["whois_info"].get("age_days")
@@ -746,9 +850,9 @@ with tab_bulk:
                 except Exception as e:
                     bulk_results.append({
                         "URL": u, "Final URL": "ERROR", "Verdict": "⚪ SCAN FAILED",
-                        "Risk %": "N/A", "Redirect Hops (Total)": "N/A", "Redirect Hops (Cross-Domain)": "N/A", "Server IP": "N/A",
-                        "SSL": "N/A",
-                        "Domain Age (days)": "N/A", "Country": "N/A",
+                        "Risk %": "N/A", "Redirect Hops (Total)": "N/A", "Redirect Hops (Cross-Domain)": "N/A",
+                        "URLhaus Match": "N/A", "GSB Match": "N/A", "Server IP": "N/A",
+                        "SSL": "N/A", "Domain Age (days)": "N/A", "Country": "N/A",
                     })
                 progress.progress((i + 1) / len(url_list), text=f"Scanning {i + 1} / {len(url_list)}...")
 
