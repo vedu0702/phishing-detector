@@ -33,24 +33,41 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.write("<div style='text-align: center; padding-top: 10px;'><span style='font-size: 38px; font-weight: 800; color: #ffffff; letter-spacing: 1px;'>THREAT</span><span style='font-size: 38px; font-weight: 800; color: #00ffcc; letter-spacing: 1px;'>-X</span><span style='font-size: 14px; font-weight: bold; color: #475569; margin-left: 8px;'>GLOBAL GUARD PRO v14.0</span></div>", unsafe_allow_html=True)
-st.write("<p style='text-align: center; color: #94a3b8; font-size: 15px; font-family: Arial;'>Enter any website address below to run our automated machine learning scanners and verify website authenticity instantly.</p>", unsafe_allow_html=True)
+st.write("<p style='text-align: center; color: #94a3b8; font-size: 15px; font-family: Arial;'>Enter any website address below to run a live scan across real threat-intelligence feeds, WHOIS, SSL, and redirect analysis.</p>", unsafe_allow_html=True)
 st.write("---")
 
-# 2. Advanced RandomForest Framework Ingestion Block
+# 2. Structural Heuristic Model (RandomForest)
+#    IMPORTANT — what this actually is: a lightweight classifier trained on a
+#    small hand-built synthetic dataset of URL STRUCTURE patterns (length,
+#    entropy, dashes, SSL, IP-masking, etc). It has no live/internet awareness
+#    of its own — it cannot know if a URL is on a blocklist, how old the domain
+#    is, or what a redirect chain does. Those are separate LIVE checks elsewhere
+#    in this app (URLhaus, GSB, WHOIS, Cert Transparency). This model exists
+#    purely to catch structurally-suspicious URLs that no live feed has seen yet.
 @st.cache_resource
 def compile_advanced_ml_model():
+    # Columns: length, has_at, subdomains, has_dash, entropy, has_token, is_ssl, is_ip_masked, result
     training_data = [
-        # --- SAFE (0) ---
-        [15, 0, 0, 0, 2.4, 0, 0], [18, 0, 1, 0, 2.7, 0, 0], [22, 0, 2, 0, 3.1, 0, 0], [28, 0, 0, 0, 2.9, 0, 0],
-        [25, 0, 1, 1, 3.2, 0, 0], [30, 0, 1, 1, 3.5, 0, 0], [33, 0, 1, 1, 3.76, 0, 0], [36, 0, 0, 1, 3.6, 0, 0],
-        [40, 0, 1, 1, 3.9, 0, 0], [20, 0, 0, 1, 3.0, 0, 0], [29, 0, 2, 0, 3.4, 0, 0], [24, 0, 1, 0, 3.1, 0, 0],
-        # --- MALICIOUS (1) ---
-        [32, 0, 1, 2, 4.2, 1, 1], [45, 0, 0, 2, 4.1, 1, 1], [55, 0, 1, 2, 4.3, 1, 1], [72, 1, 2, 1, 4.5, 1, 1],
-        [34, 0, 1, 2, 4.2, 1, 1], [17, 0, 1, 0, 4.4, 1, 1], [26, 0, 2, 1, 4.1, 1, 1], [38, 0, 1, 1, 4.0, 1, 1],
+        # --- SAFE (0): normal domains, valid SSL, no IP-masking ---
+        [15, 0, 0, 0, 2.4, 0, 1, 0, 0], [18, 0, 1, 0, 2.7, 0, 1, 0, 0], [22, 0, 2, 0, 3.1, 0, 1, 0, 0],
+        [28, 0, 0, 0, 2.9, 0, 1, 0, 0], [25, 0, 1, 1, 3.2, 0, 1, 0, 0], [30, 0, 1, 1, 3.5, 0, 1, 0, 0],
+        [33, 0, 1, 1, 3.76, 0, 1, 0, 0], [36, 0, 0, 1, 3.6, 0, 1, 0, 0], [40, 0, 1, 1, 3.9, 0, 1, 0, 0],
+        [20, 0, 0, 1, 3.0, 0, 1, 0, 0], [29, 0, 2, 0, 3.4, 0, 1, 0, 0], [24, 0, 1, 0, 3.1, 0, 1, 0, 0],
+        [16, 0, 0, 0, 2.2, 0, 1, 0, 0], [21, 0, 1, 0, 3.0, 0, 1, 0, 0], [27, 0, 0, 1, 3.3, 0, 1, 0, 0],
+        # --- SAFE but no HTTPS (older/legacy sites — still not automatically malicious) ---
+        [19, 0, 0, 0, 2.6, 0, 0, 0, 0], [23, 0, 1, 0, 3.0, 0, 0, 0, 0],
+        # --- MALICIOUS (1): valid SSL is common now (free certs), keyword lures, high entropy, dashes ---
+        [32, 0, 1, 2, 4.2, 1, 1, 0, 1], [45, 0, 0, 2, 4.1, 1, 1, 0, 1], [55, 0, 1, 2, 4.3, 1, 1, 0, 1],
+        [72, 1, 2, 1, 4.5, 1, 1, 0, 1], [34, 0, 1, 2, 4.2, 1, 1, 0, 1], [17, 0, 1, 0, 4.4, 1, 1, 0, 1],
+        [26, 0, 2, 1, 4.1, 1, 1, 0, 1], [38, 0, 1, 1, 4.0, 1, 1, 0, 1],
+        # --- MALICIOUS: no SSL at all (cheap/throwaway phishing infra) ---
+        [30, 0, 1, 2, 4.3, 1, 0, 0, 1], [42, 0, 0, 2, 4.2, 1, 0, 0, 1],
+        # --- MALICIOUS: raw IP address hosts (classic evasion, near-certain risk) ---
+        [15, 0, 0, 0, 3.8, 0, 1, 1, 1], [15, 0, 0, 0, 3.9, 1, 0, 1, 1], [18, 1, 0, 0, 4.0, 0, 1, 1, 1],
     ]
-    features = ['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token']
+    features = ['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token', 'is_ssl', 'is_ip_masked']
     df = pd.DataFrame(training_data, columns=features + ['result'])
-    clf = RandomForestClassifier(n_estimators=100, random_state=42)
+    clf = RandomForestClassifier(n_estimators=150, random_state=42)
     clf.fit(df[features], df['result'])
     return clf
 
@@ -414,7 +431,10 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None):
     urlhaus_result = check_past_phishing_history(final_url, auth_key=urlhaus_key)
     gsb_result = check_google_safe_browsing(final_url, gsb_key)
 
-    eval_dataframe = pd.DataFrame([feature_weights], columns=['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token'])
+    eval_dataframe = pd.DataFrame(
+        [feature_weights + [pro_meta["is_ssl"], pro_meta["is_ip_masked"]]],
+        columns=['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token', 'is_ssl', 'is_ip_masked']
+    )
     ml_probabilities = cyber_classifier.predict_proba(eval_dataframe)
     ml_phish_probability = float(ml_probabilities[0][1])
 
@@ -824,14 +844,33 @@ with tab_single:
 
             st.write("---")
             st.write("#### 📡 System Integrity Verification Details:")
-            l_col1, l_col2 = st.columns(2)
+            st.write(f"🌐 **Website Host Server IP:** `{resolved_ip}`")
+            st.write(f"🔌 **Server Connection Status:** {dns_status_log}")
 
-            with l_col1:
-                st.write(f"🌐 **Website Host Server IP:** `{resolved_ip}`")
-                st.write(f"🔌 **Server Connection Status:** {dns_status_log}")
+            st.write("---")
 
-            with l_col2:
-                st.write(f"🧠 **AI Prediction Output:** :{'red[SUSPICIOUS ACTIVITY MATCH]' if is_malicious_class else 'green[LEGITIMATE WEBSITE SIGNATURE]'}")
+            # AI PREDICTION OUTPUT — the model's own, standalone opinion.
+            # This is intentionally kept SEPARATE from the composite "Scanner
+            # Status" badge above: that badge blends live threat feeds, WHOIS,
+            # certs, and redirects. This section shows only what the trained
+            # structural model itself thinks, based purely on URL shape.
+            st.write("#### 🧠 AI Prediction Output (structural model only):")
+            ml_confidence = round(ml_phish_probability * 100, 1)
+            ml_verdict = "🔴 Suspicious Structure" if ml_phish_probability >= 0.5 else "🟢 Normal Structure"
+            ai_col1, ai_col2 = st.columns(2)
+            with ai_col1:
+                st.write(f"**Model Verdict:** {ml_verdict}")
+                st.write(f"**Confidence:** {ml_confidence}%")
+            with ai_col2:
+                st.write(f"**SSL Present:** {'Yes' if pro_meta['is_ssl'] else 'No'}")
+                st.write(f"**Raw-IP Host:** {'Yes' if pro_meta['is_ip_masked'] else 'No'}")
+            st.caption(
+                "This model only analyzes URL structure (length, entropy, dashes, SSL, "
+                "IP-masking, keywords) — it has no internet access of its own and cannot "
+                "know if a URL is blocklisted, how old the domain is, or where it redirects. "
+                "Those live signals are shown separately below and are what actually drive "
+                "the overall Scanner Status verdict at the top of this report."
+            )
 
             st.write("---")
 
@@ -919,16 +958,18 @@ with tab_single:
 
             st.write("---")
             st.write("#### 🧠 Technical System Ingestion Metrics:")
-            st.info(f"**Extracted Live Feature Vector Sequence:** {feature_weights}")
+            full_vector = feature_weights + [pro_meta["is_ssl"], pro_meta["is_ip_masked"]]
+            st.info(f"**Structural Feature Vector (fed to model):** {full_vector} "
+                    f"→ [length, has_at, subdomains, has_dash, entropy, has_token, is_ssl, is_ip_masked]")
             st.markdown(f"""
-            - **Random Forest Base Confidence Core:** `{round(ml_phish_probability*100, 1)}% Structural Deviation Weight`
+            - **Structural Model Confidence:** `{round(ml_phish_probability*100, 1)}%` (URL-shape signal only — see AI Prediction Output above)
             - **URL Lexical Parameters Check:** Length: `{feature_weights[0]}` | Subdomains Detected: `{feature_weights[2]}` | Structural Hyphens: `{feature_weights[3]}` | String Entropy: `{feature_weights[4]}`
             """)
 
             if is_malicious_class:
-                st.error("🛑 ACTION RECOMMENDED: Our Artificial Intelligence engine recommends closing this tab immediately. The URL demonstrates verified fraudulent design footprints.")
+                st.error("🛑 ACTION RECOMMENDED: Multiple live and structural signals indicate this URL is unsafe. Avoid entering credentials or personal data.")
             else:
-                st.success("✔ SECURITY CLEARANCE GRANTED: This website satisfies all structural security patterns. No phishing behaviors were detected.")
+                st.success("✔ No live threat-feed matches or high-risk structural patterns were found in this scan.")
 
             # PRO FEATURE: Downloadable report
             st.write("---")
