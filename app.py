@@ -343,6 +343,7 @@ def scan_url(user_target, gsb_key=None):
     resolved_ip, dns_status_log = resolve_live_dns_ip(host_domain)
     geo_info = resolve_geolocation(resolved_ip)
     whois_info = resolve_whois_record(host_domain)
+    cert_info = check_cert_transparency(host_domain)
     has_scam_history, history_log_msg = check_past_phishing_history(final_url)
     gsb_result = check_google_safe_browsing(final_url, gsb_key)
 
@@ -362,6 +363,11 @@ def scan_url(user_target, gsb_key=None):
             dynamic_risk_weight += 20.0
         elif whois_info["age_days"] < 180:
             dynamic_risk_weight += 8.0
+    if cert_info.get("found") and cert_info.get("age_days") is not None:
+        if cert_info["age_days"] < 7:
+            dynamic_risk_weight += 15.0
+        elif cert_info["age_days"] < 30:
+            dynamic_risk_weight += 6.0
     if domain_drift:
         dynamic_risk_weight += 20.0
     if has_scam_history:
@@ -387,6 +393,7 @@ def scan_url(user_target, gsb_key=None):
         "dns_status_log": dns_status_log,
         "geo_info": geo_info,
         "whois_info": whois_info,
+        "cert_info": cert_info,
         "has_scam_history": has_scam_history,
         "history_log_msg": history_log_msg,
         "gsb_result": gsb_result,
@@ -416,6 +423,9 @@ def build_single_scan_csv(result):
         "Domain Age (days)": (result["whois_info"].get("age_days")
                               if result["whois_info"].get("age_days") is not None else "N/A"),
         "Registrar": result["whois_info"].get("registrar", "N/A"),
+        "Cert Age (days)": (result["cert_info"].get("age_days")
+                            if result["cert_info"].get("age_days") is not None else "N/A"),
+        "Cert Issuer": result["cert_info"].get("issuer", "N/A"),
         "Country (Server)": result["geo_info"]["country"] if result["geo_info"] else "N/A",
         "Scanned At (UTC)": result["scanned_at"],
     }
@@ -463,6 +473,10 @@ def build_single_scan_pdf(result):
             ]
         else:
             lines.append(f"WHOIS unavailable: {result['whois_info'].get('error')}")
+
+        lines.append("")
+        lines.append("-- Certificate Transparency --")
+        lines.append(result["cert_info"]["status"])
 
         lines.append("")
         lines.append("-- Geolocation --")
@@ -781,6 +795,19 @@ with tab_single:
                     st.write(f"🖥️ **Name Servers:** {', '.join(whois_info['name_servers'][:4])}")
             else:
                 st.write(f"⚪ {whois_info.get('error', 'WHOIS data unavailable')}")
+
+            st.write("---")
+
+            # PRO FEATURE: Certificate Transparency (Cert Spotter)
+            st.write("#### 🔏 Certificate Transparency Check:")
+            cert_info = result["cert_info"]
+            st.write(cert_info["status"])
+            if cert_info.get("found"):
+                c_col1, c_col2 = st.columns(2)
+                with c_col1:
+                    st.write(f"🏢 **Issuer:** {cert_info['issuer']}")
+                with c_col2:
+                    st.write(f"📊 **Total Certs Seen (CT logs):** {cert_info['total_certs_seen']}")
 
             st.write("---")
 
