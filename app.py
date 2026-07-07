@@ -56,18 +56,25 @@ def compile_advanced_ml_model():
 
 cyber_classifier = compile_advanced_ml_model()
 
-# 3. Live URLhaus Threat-Feed Check (free, no key required)
-def check_past_phishing_history(target_url):
+# 3. Live URLhaus Threat-Feed Check
+#    abuse.ch now REQUIRES a free Auth-Key for all API access (this changed —
+#    it used to be fully open). Get one free at https://auth.abuse.ch/
+#    (log in with Google/GitHub/etc, then generate an Auth-Key in your profile).
+def check_past_phishing_history(target_url, auth_key=None):
     """
     NOTE: URLhaus is a MALWARE-distribution feed, not a phishing blocklist.
     It will rarely catch pure credential-phishing pages that host no malware
     payload — that's expected, not a bug. Google Safe Browsing (below) is the
     only feed in this app with dedicated SOCIAL_ENGINEERING (phishing) coverage.
     """
+    if not auth_key:
+        return {"checked": False, "matched": False,
+                "status": "⚪ Skipped — no URLhaus Auth-Key configured (free at auth.abuse.ch)"}
     try:
         response = requests.post(
             "https://urlhaus-api.abuse.ch/v1/url/",
             data={'url': target_url},
+            headers={"Auth-Key": auth_key},
             timeout=4.0
         )
         if response.status_code == 200:
@@ -77,6 +84,9 @@ def check_past_phishing_history(target_url):
                         "status": f"🔴 Reported in Global Blocklist databases (Class: {res_data.get('threat')})"}
             return {"checked": True, "matched": False,
                     "status": "🟢 No match — not present in URLhaus (malware-focused feed, not phishing-specific)"}
+        if response.status_code == 401:
+            return {"checked": False, "matched": False,
+                    "status": "⚪ URLhaus Auth-Key invalid or expired (HTTP 401) — check your key at auth.abuse.ch"}
         return {"checked": False, "matched": False, "status": f"⚪ URLhaus check failed (HTTP {response.status_code})"}
     except Exception:
         return {"checked": False, "matched": False, "status": "⚪ URLhaus check failed (network/timeout error)"}
@@ -359,7 +369,7 @@ def has_domain_drift(original_url, final_url):
 
 def extract_lexical_vectors(url):
     if not url.startswith(('http://', 'https://')):
-        url = 'http://' + url
+        url = 'https://' + url
 
     parsed = urlparse(url)
     host = parsed.netloc
@@ -389,8 +399,8 @@ def extract_lexical_vectors(url):
     return features, host, pro_heuristics
 
 # 6. Unified scan pipeline — used by both Single Scan and Bulk Scan
-def scan_url(user_target, gsb_key=None):
-    original_url = user_target if user_target.startswith(('http://', 'https://')) else 'http://' + user_target
+def scan_url(user_target, gsb_key=None, urlhaus_key=None):
+    original_url = user_target if user_target.startswith(('http://', 'https://')) else 'https://' + user_target
 
     redirect_chain, final_url = trace_redirect_chain(original_url)
     cross_domain_hops = count_cross_domain_hops(redirect_chain)
@@ -401,7 +411,7 @@ def scan_url(user_target, gsb_key=None):
     geo_info = resolve_geolocation(resolved_ip)
     whois_info = resolve_whois_record(host_domain)
     cert_info = check_cert_transparency(host_domain)
-    urlhaus_result = check_past_phishing_history(final_url)
+    urlhaus_result = check_past_phishing_history(final_url, auth_key=urlhaus_key)
     gsb_result = check_google_safe_browsing(final_url, gsb_key)
 
     eval_dataframe = pd.DataFrame([feature_weights], columns=['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token'])
@@ -696,17 +706,26 @@ def build_file_scan_csv(fresult):
     pd.DataFrame([row]).to_csv(buf, index=False)
     return buf.getvalue().encode("utf-8")
 
-# 8. Google Safe Browsing key — read from server-side secrets, never shown to end users.
-#    Configure this in Streamlit Cloud: App settings -> Secrets -> add:
+# 8. API keys — read from server-side secrets, never shown to end users.
+#    Configure these in Streamlit Cloud: App settings -> Secrets -> add:
 #        GSB_API_KEY = "your-google-safe-browsing-key-here"
-#    If no key is configured, GSB checks are silently skipped (URLhaus/WHOIS/DNS/Geo still run).
+#        URLHAUS_AUTH_KEY = "your-urlhaus-auth-key-here"
+#    (URLhaus free key: log in at https://auth.abuse.ch/ then generate an Auth-Key in your profile)
+#    If a key is missing, that specific check is silently skipped — everything else still runs.
 def get_gsb_api_key():
     try:
         return st.secrets.get("GSB_API_KEY", "")
     except Exception:
         return ""
 
+def get_urlhaus_auth_key():
+    try:
+        return st.secrets.get("URLHAUS_AUTH_KEY", "")
+    except Exception:
+        return ""
+
 gsb_api_key = get_gsb_api_key()
+urlhaus_auth_key = get_urlhaus_auth_key()
 
 # 8b. User Console Interface — Single Scan / Bulk Scan / File Scan
 tab_single, tab_bulk, tab_file = st.tabs(["🔍 Single Scan", "📂 Bulk Scan", "🗂️ File Scan"])
@@ -717,7 +736,7 @@ with tab_single:
     if st.button("🔍 SCAN WEBSITE NOW"):
         if user_target:
             with st.spinner("Tracing redirects, checking threat feeds, WHOIS and geolocation..."):
-                result = scan_url(user_target, gsb_key=gsb_api_key)
+                result = scan_url(user_target, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key)
 
             risk_percent = result["risk_percent"]
             safety_percent = result["safety_percent"]
@@ -972,7 +991,7 @@ with tab_bulk:
 
             for i, u in enumerate(url_list):
                 try:
-                    res = scan_url(u, gsb_key=gsb_api_key)
+                    res = scan_url(u, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key)
                     bulk_results.append({
                         "URL": res["input_url"],
                         "Final URL": res["final_url"],
