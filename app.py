@@ -196,6 +196,63 @@ def resolve_whois_record(hostname):
             continue
     return {"found": False, "error": "No RDAP record found — domain may be unregistered, or registry unreachable"}
 
+# 4b-2. Live Certificate Transparency Check via SSLMate's Cert Spotter API
+#       (pure HTTPS, no key needed for basic queries — far more stable than crt.sh)
+def check_cert_transparency(hostname):
+    """
+    Looks up how recently an SSL certificate was issued for this domain, using
+    public Certificate Transparency logs via Cert Spotter (SSLMate). A very
+    freshly-issued cert (e.g. same week) is a common signal for newly-stood-up
+    phishing infrastructure, since attackers often spin up domain + cert together.
+    """
+    for candidate in _base_domain_candidates(hostname):
+        try:
+            resp = requests.get(
+                "https://api.certspotter.com/v1/issuances",
+                params={"domain": candidate, "include_subdomains": "true", "expand": "cert"},
+                timeout=6
+            )
+            if resp.status_code != 200:
+                continue
+            issuances = resp.json()
+            if not issuances:
+                return {"found": False, "status": "⚪ No certificates found in CT logs for this domain"}
+
+            # Find the most recently issued certificate
+            newest = None
+            newest_dt = None
+            for entry in issuances:
+                not_before = entry.get("not_before")
+                try:
+                    dt = datetime.datetime.fromisoformat(not_before.replace('Z', '+00:00'))
+                except Exception:
+                    continue
+                if newest_dt is None or dt > newest_dt:
+                    newest_dt = dt
+                    newest = entry
+
+            if newest_dt is None:
+                return {"found": False, "status": "⚪ Could not parse certificate issuance dates"}
+
+            age_days = (datetime.datetime.now(datetime.timezone.utc) - newest_dt).days
+            issuer = newest.get("issuer", {}).get("name", "Unknown") if isinstance(newest.get("issuer"), dict) else "Unknown"
+            total_certs = len(issuances)
+
+            if age_days < 7:
+                status = f"🔴 Newest cert issued only {age_days} day(s) ago — freshly stood-up infrastructure (common phishing trait)"
+            elif age_days < 30:
+                status = f"🟠 Newest cert issued {age_days} days ago — recently deployed"
+            else:
+                status = f"🟢 Newest cert issued {age_days} days ago — established certificate history"
+
+            return {
+                "found": True, "age_days": age_days, "issuer": issuer,
+                "total_certs_seen": total_certs, "status": status
+            }
+        except Exception:
+            continue
+    return {"found": False, "status": "⚪ Certificate Transparency lookup unavailable"}
+
 # 4c. Redirect Chain Tracer — follows shorteners/redirect hops to the real final page
 def trace_redirect_chain(url, max_hops=10):
     """
