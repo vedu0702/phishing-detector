@@ -154,6 +154,21 @@ def trace_redirect_chain(url, max_hops=10):
         return chain, url
 
 # 5. Core Lexical Calculation & Extended Heuristics Engine
+def normalize_host_for_comparison(url):
+    """Strips scheme/www/port so http->https or www upgrades aren't counted as 'real' redirects."""
+    h = urlparse(url).netloc.lower().split(':')[0]
+    if h.startswith('www.'):
+        h = h[4:]
+    return h
+
+def count_cross_domain_hops(chain):
+    """Counts only redirects that actually change the destination domain (ignores protocol/www upgrades)."""
+    count = 0
+    for i in range(len(chain) - 1):
+        if normalize_host_for_comparison(chain[i]) != normalize_host_for_comparison(chain[i + 1]):
+            count += 1
+    return count
+
 def extract_lexical_vectors(url):
     if not url.startswith(('http://', 'https://')):
         url = 'http://' + url
@@ -174,7 +189,7 @@ def extract_lexical_vectors(url):
               'goog1e', 'faceb00k', 'netfliix', 'shekarius', '124', 'allegromt',
               'paypal', 'sbi', 'amazon', 'auth', 'portal']
     has_token = 1 if any(kw in clean for kw in tokens) and not any(
-        wl in host for wl in ['google.com', 'github.com', 'wikipedia.org', 'paypal.com']
+        wl in clean for wl in ['google.com', 'github.com', 'wikipedia.org', 'paypal.com']
     ) else 0
 
     # Extended pro features
@@ -190,6 +205,7 @@ def scan_url(user_target):
     original_url = user_target if user_target.startswith(('http://', 'https://')) else 'http://' + user_target
 
     redirect_chain, final_url = trace_redirect_chain(original_url)
+    cross_domain_hops = count_cross_domain_hops(redirect_chain)
 
     feature_weights, host_domain, pro_meta = extract_lexical_vectors(final_url)
     resolved_ip, dns_status_log = resolve_live_dns_ip(host_domain)
@@ -212,7 +228,7 @@ def scan_url(user_target):
             dynamic_risk_weight += 20.0
         elif whois_info["age_days"] < 180:
             dynamic_risk_weight += 8.0
-    if len(redirect_chain) > 2:
+    if cross_domain_hops >= 2:
         dynamic_risk_weight += 10.0
 
     risk_percent = round(min(99.4, max(4.2, dynamic_risk_weight)), 1)
@@ -224,6 +240,7 @@ def scan_url(user_target):
         "original_url": original_url,
         "final_url": final_url,
         "redirect_chain": redirect_chain,
+        "cross_domain_hops": cross_domain_hops,
         "host_domain": host_domain,
         "feature_weights": feature_weights,
         "pro_meta": pro_meta,
@@ -243,7 +260,8 @@ def build_single_scan_csv(result):
     row = {
         "Scanned URL": result["input_url"],
         "Final URL": result["final_url"],
-        "Redirect Hops": len(result["redirect_chain"]) - 1,
+        "Redirect Hops (Total)": len(result["redirect_chain"]) - 1,
+        "Redirect Hops (Cross-Domain)": result["cross_domain_hops"],
         "Verdict": "DANGEROUS" if result["is_malicious_class"] else "SAFE",
         "Risk %": result["risk_percent"],
         "Safety %": result["safety_percent"],
@@ -251,7 +269,8 @@ def build_single_scan_csv(result):
         "DNS Status": result["dns_status_log"],
         "SSL": "Yes" if result["pro_meta"]["is_ssl"] else "No",
         "IP-Masked Domain": "Yes" if result["pro_meta"]["is_ip_masked"] else "No",
-        "Domain Age (days)": result["whois_info"].get("age_days", "N/A"),
+        "Domain Age (days)": (result["whois_info"].get("age_days")
+                              if result["whois_info"].get("age_days") is not None else "N/A"),
         "Registrar": result["whois_info"].get("registrar", "N/A"),
         "Country (Server)": result["geo_info"]["country"] if result["geo_info"] else "N/A",
         "Scanned At (UTC)": result["scanned_at"],
@@ -273,7 +292,7 @@ def build_single_scan_pdf(result):
             "=" * 60,
             f"Scanned URL:      {result['input_url']}",
             f"Final URL:        {result['final_url']}",
-            f"Redirect Hops:    {len(result['redirect_chain']) - 1}",
+            f"Redirect Hops:    {len(result['redirect_chain']) - 1} total ({result['cross_domain_hops']} cross-domain)",
             f"Scanned At (UTC): {result['scanned_at']}",
             "",
             f"VERDICT: {verdict}",
@@ -362,8 +381,10 @@ def detect_file_signature(file_bytes: bytes):
 def check_extension_mismatch(filename: str, file_bytes: bytes):
     ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
     desc, expected_exts = detect_file_signature(file_bytes)
+    if not ext:
+        return False, f"⚪ File has no extension to verify — detected content type: {desc}."
     if not expected_exts:
-        return False, f"⚪ Could not verify — unrecognized binary signature for `{ext or 'no extension'}`."
+        return False, f"⚪ Could not verify — unrecognized binary signature for `{ext}`."
     if ext in expected_exts:
         return False, f"✅ File extension `{ext}` matches its actual content type ({desc})."
     return True, (f"🚨 MISMATCH: File is named `{ext}` but its real binary signature is **{desc}** — "
@@ -476,6 +497,7 @@ with tab_single:
             feature_weights = result["feature_weights"]
             pro_meta = result["pro_meta"]
             redirect_chain = result["redirect_chain"]
+            cross_domain_hops = result["cross_domain_hops"]
             ml_phish_probability = result["ml_phish_probability"]
 
             # METRICS & ANALYSIS DASHBOARD
@@ -517,9 +539,19 @@ with tab_single:
             # PRO FEATURE: Redirect Chain Tracing
             st.write("#### 🔀 Redirect Chain Trace:")
             if len(redirect_chain) > 1:
-                st.warning(f"⚠️ This link redirects through {len(redirect_chain) - 1} hop(s) before reaching its final destination.")
+                if cross_domain_hops > 0:
+                    st.warning(f"⚠️ This link redirects through {cross_domain_hops} cross-domain hop(s) before reaching its final destination.")
+                else:
+                    st.write(f"✅ Redirects only within the same domain (e.g. http→https or www upgrade) — not treated as risky.")
                 for i, hop in enumerate(redirect_chain):
-                    tag = "🔗 Start" if i == 0 else ("🏁 Final Destination" if i == len(redirect_chain) - 1 else f"➡️ Hop {i}")
+                    if i == 0:
+                        tag = "🔗 Start"
+                    elif i == len(redirect_chain) - 1:
+                        tag = "🏁 Final Destination"
+                    elif normalize_host_for_comparison(redirect_chain[i - 1]) != normalize_host_for_comparison(hop):
+                        tag = f"🔀 Hop {i} (domain change)"
+                    else:
+                        tag = f"⬆️ Hop {i} (same domain)"
                     st.write(f"**{tag}:** `{hop}`")
             else:
                 st.write(f"✅ No redirects detected — direct link to `{redirect_chain[0]}`")
@@ -593,7 +625,7 @@ with tab_single:
                     "Triggered (Malicious Keywords Found)" if feature_weights[5] == 1 else "Clean Structural Patterns",
                     f"{feature_weights[3]} Structural Dash Elements Detected",
                     f"{feature_weights[2]} Segment Subdomains Layered",
-                    f"{len(redirect_chain) - 1} Redirect Hop(s) Detected",
+                    f"{cross_domain_hops} Cross-Domain Redirect Hop(s) Detected",
                 ],
                 "Risk Severity Rating": [
                     "✅ LOW RISK" if pro_meta["is_ssl"] == 1 else "⚠️ MEDIUM RISK ALERT",
@@ -601,7 +633,7 @@ with tab_single:
                     "⚠️ HIGH SUSPICION" if feature_weights[5] == 1 else "✅ SECURE INFRASTRUCTURE",
                     "⚠️ MINOR ANOMALY" if feature_weights[3] > 0 else "✅ SECURE INFRASTRUCTURE",
                     "⚠️ MEDIUM SUSPICION" if feature_weights[2] > 1 else "✅ SECURE INFRASTRUCTURE",
-                    "⚠️ MEDIUM SUSPICION" if len(redirect_chain) > 2 else "✅ SECURE INFRASTRUCTURE",
+                    "⚠️ MEDIUM SUSPICION" if cross_domain_hops >= 2 else "✅ SECURE INFRASTRUCTURE",
                 ]
             }
             st.table(pd.DataFrame(breakdown_data))
@@ -686,16 +718,18 @@ with tab_bulk:
                         "Final URL": res["final_url"],
                         "Verdict": "⚠️ DANGEROUS" if res["is_malicious_class"] else "✅ SAFE",
                         "Risk %": res["risk_percent"],
-                        "Redirect Hops": len(res["redirect_chain"]) - 1,
+                        "Redirect Hops (Total)": len(res["redirect_chain"]) - 1,
+                        "Redirect Hops (Cross-Domain)": res["cross_domain_hops"],
                         "Server IP": res["resolved_ip"],
                         "SSL": "Yes" if res["pro_meta"]["is_ssl"] else "No",
-                        "Domain Age (days)": res["whois_info"].get("age_days", "N/A"),
+                        "Domain Age (days)": (res["whois_info"].get("age_days")
+                                              if res["whois_info"].get("age_days") is not None else "N/A"),
                         "Country": res["geo_info"]["country"] if res["geo_info"] else "N/A",
                     })
                 except Exception as e:
                     bulk_results.append({
                         "URL": u, "Final URL": "ERROR", "Verdict": "⚪ SCAN FAILED",
-                        "Risk %": "N/A", "Redirect Hops": "N/A", "Server IP": "N/A",
+                        "Risk %": "N/A", "Redirect Hops (Total)": "N/A", "Redirect Hops (Cross-Domain)": "N/A", "Server IP": "N/A",
                         "SSL": "N/A",
                         "Domain Age (days)": "N/A", "Country": "N/A",
                     })
