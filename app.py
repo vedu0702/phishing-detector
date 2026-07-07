@@ -40,9 +40,13 @@ st.write("---")
 @st.cache_resource
 def compile_advanced_ml_model():
     training_data = [
+        # --- SAFE (0) ---
         [15, 0, 0, 0, 2.4, 0, 0], [18, 0, 1, 0, 2.7, 0, 0], [22, 0, 2, 0, 3.1, 0, 0], [28, 0, 0, 0, 2.9, 0, 0],
+        [25, 0, 1, 1, 3.2, 0, 0], [30, 0, 1, 1, 3.5, 0, 0], [33, 0, 1, 1, 3.76, 0, 0], [36, 0, 0, 1, 3.6, 0, 0],
+        [40, 0, 1, 1, 3.9, 0, 0], [20, 0, 0, 1, 3.0, 0, 0], [29, 0, 2, 0, 3.4, 0, 0], [24, 0, 1, 0, 3.1, 0, 0],
+        # --- MALICIOUS (1) ---
         [32, 0, 1, 2, 4.2, 1, 1], [45, 0, 0, 2, 4.1, 1, 1], [55, 0, 1, 2, 4.3, 1, 1], [72, 1, 2, 1, 4.5, 1, 1],
-        [34, 0, 1, 2, 4.2, 1, 1], [17, 0, 1, 0, 4.4, 1, 1], [26, 0, 2, 1, 4.1, 1, 1], [38, 0, 1, 1, 4.0, 1, 1]
+        [34, 0, 1, 2, 4.2, 1, 1], [17, 0, 1, 0, 4.4, 1, 1], [26, 0, 2, 1, 4.1, 1, 1], [38, 0, 1, 1, 4.0, 1, 1],
     ]
     features = ['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token']
     df = pd.DataFrame(training_data, columns=features + ['result'])
@@ -169,6 +173,14 @@ def count_cross_domain_hops(chain):
             count += 1
     return count
 
+def has_domain_drift(original_url, final_url):
+    """
+    True only if the link ends up on a genuinely different domain than what was typed/requested.
+    Auth-relay bounces that loop back to the SAME domain (common on Streamlit Cloud, OAuth flows,
+    session-cookie walls, etc.) are not drift — the visitor still lands where they expected.
+    """
+    return normalize_host_for_comparison(original_url) != normalize_host_for_comparison(final_url)
+
 def extract_lexical_vectors(url):
     if not url.startswith(('http://', 'https://')):
         url = 'http://' + url
@@ -206,6 +218,7 @@ def scan_url(user_target):
 
     redirect_chain, final_url = trace_redirect_chain(original_url)
     cross_domain_hops = count_cross_domain_hops(redirect_chain)
+    domain_drift = has_domain_drift(original_url, final_url)
 
     feature_weights, host_domain, pro_meta = extract_lexical_vectors(final_url)
     resolved_ip, dns_status_log = resolve_live_dns_ip(host_domain)
@@ -228,8 +241,8 @@ def scan_url(user_target):
             dynamic_risk_weight += 20.0
         elif whois_info["age_days"] < 180:
             dynamic_risk_weight += 8.0
-    if cross_domain_hops >= 2:
-        dynamic_risk_weight += 10.0
+    if domain_drift:
+        dynamic_risk_weight += 20.0
 
     risk_percent = round(min(99.4, max(4.2, dynamic_risk_weight)), 1)
     safety_percent = round(100.0 - risk_percent, 1)
@@ -241,6 +254,7 @@ def scan_url(user_target):
         "final_url": final_url,
         "redirect_chain": redirect_chain,
         "cross_domain_hops": cross_domain_hops,
+        "domain_drift": domain_drift,
         "host_domain": host_domain,
         "feature_weights": feature_weights,
         "pro_meta": pro_meta,
@@ -498,6 +512,7 @@ with tab_single:
             pro_meta = result["pro_meta"]
             redirect_chain = result["redirect_chain"]
             cross_domain_hops = result["cross_domain_hops"]
+            domain_drift = result["domain_drift"]
             ml_phish_probability = result["ml_phish_probability"]
 
             # METRICS & ANALYSIS DASHBOARD
@@ -539,8 +554,10 @@ with tab_single:
             # PRO FEATURE: Redirect Chain Tracing
             st.write("#### 🔀 Redirect Chain Trace:")
             if len(redirect_chain) > 1:
-                if cross_domain_hops > 0:
-                    st.warning(f"⚠️ This link redirects through {cross_domain_hops} cross-domain hop(s) before reaching its final destination.")
+                if domain_drift:
+                    st.warning(f"⚠️ This link ends up on a different domain than what was entered — the final destination doesn't match the original request.")
+                elif cross_domain_hops > 0:
+                    st.write(f"ℹ️ This link passes through {cross_domain_hops} intermediate domain(s) but loops back to the original domain (e.g. an auth/session relay) — not treated as risky.")
                 else:
                     st.write(f"✅ Redirects only within the same domain (e.g. http→https or www upgrade) — not treated as risky.")
                 for i, hop in enumerate(redirect_chain):
