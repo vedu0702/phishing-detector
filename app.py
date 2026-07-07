@@ -58,6 +58,12 @@ cyber_classifier = compile_advanced_ml_model()
 
 # 3. Live URLhaus Threat-Feed Check (free, no key required)
 def check_past_phishing_history(target_url):
+    """
+    NOTE: URLhaus is a MALWARE-distribution feed, not a phishing blocklist.
+    It will rarely catch pure credential-phishing pages that host no malware
+    payload — that's expected, not a bug. Google Safe Browsing (below) is the
+    only feed in this app with dedicated SOCIAL_ENGINEERING (phishing) coverage.
+    """
     try:
         response = requests.post(
             "https://urlhaus-api.abuse.ch/v1/url/",
@@ -67,10 +73,13 @@ def check_past_phishing_history(target_url):
         if response.status_code == 200:
             res_data = response.json()
             if res_data.get('query_status') == 'ok':
-                return True, f"Reported scam listed in Global Blocklist databases (Class: {res_data.get('threat')})"
+                return {"checked": True, "matched": True,
+                        "status": f"🔴 Reported in Global Blocklist databases (Class: {res_data.get('threat')})"}
+            return {"checked": True, "matched": False,
+                    "status": "🟢 No match — not present in URLhaus (malware-focused feed, not phishing-specific)"}
+        return {"checked": False, "matched": False, "status": f"⚪ URLhaus check failed (HTTP {response.status_code})"}
     except Exception:
-        pass
-    return False, "Clean record: No active historical threats listed inside open intelligence repositories."
+        return {"checked": False, "matched": False, "status": "⚪ URLhaus check failed (network/timeout error)"}
 
 # 3b. Google Safe Browsing Check (optional, needs a free API key)
 def check_google_safe_browsing(target_url, api_key):
@@ -344,7 +353,7 @@ def scan_url(user_target, gsb_key=None):
     geo_info = resolve_geolocation(resolved_ip)
     whois_info = resolve_whois_record(host_domain)
     cert_info = check_cert_transparency(host_domain)
-    has_scam_history, history_log_msg = check_past_phishing_history(final_url)
+    urlhaus_result = check_past_phishing_history(final_url)
     gsb_result = check_google_safe_browsing(final_url, gsb_key)
 
     eval_dataframe = pd.DataFrame([feature_weights], columns=['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token'])
@@ -370,7 +379,7 @@ def scan_url(user_target, gsb_key=None):
             dynamic_risk_weight += 6.0
     if domain_drift:
         dynamic_risk_weight += 20.0
-    if has_scam_history:
+    if urlhaus_result.get("matched"):
         dynamic_risk_weight += 30.0
     if gsb_result.get("matched"):
         dynamic_risk_weight += 45.0
@@ -394,8 +403,7 @@ def scan_url(user_target, gsb_key=None):
         "geo_info": geo_info,
         "whois_info": whois_info,
         "cert_info": cert_info,
-        "has_scam_history": has_scam_history,
-        "history_log_msg": history_log_msg,
+        "urlhaus_result": urlhaus_result,
         "gsb_result": gsb_result,
         "ml_phish_probability": ml_phish_probability,
         "risk_percent": risk_percent,
@@ -418,7 +426,9 @@ def build_single_scan_csv(result):
         "DNS Status": result["dns_status_log"],
         "SSL": "Yes" if result["pro_meta"]["is_ssl"] else "No",
         "IP-Masked Domain": "Yes" if result["pro_meta"]["is_ip_masked"] else "No",
-        "URLhaus Match": result["has_scam_history"],
+        "URLhaus Checked OK": result["urlhaus_result"].get("checked", False),
+        "URLhaus Match": result["urlhaus_result"].get("matched", False),
+        "GSB Checked OK": result["gsb_result"].get("checked", False),
         "Google Safe Browsing Match": result["gsb_result"].get("matched", False),
         "Domain Age (days)": (result["whois_info"].get("age_days")
                               if result["whois_info"].get("age_days") is not None else "N/A"),
@@ -454,7 +464,7 @@ def build_single_scan_pdf(result):
             f"Safety Score: {result['safety_percent']}%",
             "",
             "-- Threat Intelligence --",
-            f"URLhaus:              {result['history_log_msg']}",
+            f"URLhaus:              {result['urlhaus_result']['status']}",
             f"Google Safe Browsing:  {result['gsb_result']['status']}",
             "",
             "-- Network --",
@@ -674,8 +684,7 @@ with tab_single:
             cross_domain_hops = result["cross_domain_hops"]
             domain_drift = result["domain_drift"]
             ml_phish_probability = result["ml_phish_probability"]
-            has_scam_history = result["has_scam_history"]
-            history_log_msg = result["history_log_msg"]
+            urlhaus_result = result["urlhaus_result"]
             gsb_result = result["gsb_result"]
 
             # METRICS & ANALYSIS DASHBOARD
@@ -718,9 +727,25 @@ with tab_single:
             st.write("#### 📡 Live Threat Feed Results:")
             tf_col1, tf_col2 = st.columns(2)
             with tf_col1:
-                st.write(f"📝 **URLhaus:** :{'red[MATCH — ' + history_log_msg + ']' if has_scam_history else 'green[' + history_log_msg + ']'}")
+                st.write(f"📝 **URLhaus:** {urlhaus_result['status']}")
             with tf_col2:
                 st.write(f"🌐 **Google Safe Browsing:** {gsb_result['status']}")
+
+            with st.expander("🔧 Developer Diagnostics — did each live check actually run?"):
+                st.caption(
+                    "This panel exists so you (the site owner) can tell the difference between "
+                    "'genuinely clean' and 'the check silently failed.' A failed check never adds "
+                    "risk points, so an unusually high safe rate can hide here."
+                )
+                diag_col1, diag_col2 = st.columns(2)
+                with diag_col1:
+                    st.write(f"URLhaus reachable: {'✅ Yes' if urlhaus_result.get('checked') else '❌ No / errored'}")
+                    st.write(f"GSB key detected: {'✅ Yes' if gsb_api_key else '❌ No key configured'}")
+                    st.write(f"GSB check completed: {'✅ Yes' if gsb_result.get('checked') else '❌ No / errored'}")
+                with diag_col2:
+                    st.write(f"WHOIS/RDAP record found: {'✅ Yes' if whois_info.get('found') else '❌ No'}")
+                    st.write(f"Cert Transparency data found: {'✅ Yes' if result['cert_info'].get('found') else '❌ No'}")
+                    st.write(f"DNS resolved: {'✅ Yes' if resolved_ip != '0.0.0.0' else '❌ No'}")
 
             st.write("---")
 
@@ -923,7 +948,7 @@ with tab_bulk:
                         "Risk %": res["risk_percent"],
                         "Redirect Hops (Total)": len(res["redirect_chain"]) - 1,
                         "Redirect Hops (Cross-Domain)": res["cross_domain_hops"],
-                        "URLhaus Match": res["has_scam_history"],
+                        "URLhaus Match": res["urlhaus_result"].get("matched", False),
                         "GSB Match": res["gsb_result"].get("matched", False),
                         "Server IP": res["resolved_ip"],
                         "SSL": "Yes" if res["pro_meta"]["is_ssl"] else "No",
