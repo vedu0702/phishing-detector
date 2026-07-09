@@ -37,32 +37,19 @@ st.write("<p style='text-align: center; color: #94a3b8; font-size: 15px; font-fa
 st.write("---")
 
 # 2. Structural Heuristic Model (RandomForest)
-#    IMPORTANT — what this actually is: a lightweight classifier trained on a
-#    small hand-built synthetic dataset of URL STRUCTURE patterns (length,
-#    entropy, dashes, SSL, IP-masking, etc). It has no live/internet awareness
-#    of its own — it cannot know if a URL is on a blocklist, how old the domain
-#    is, or what a redirect chain does. Those are separate LIVE checks elsewhere
-#    in this app (URLhaus, GSB, WHOIS, Cert Transparency). This model exists
-#    purely to catch structurally-suspicious URLs that no live feed has seen yet.
 @st.cache_resource
 def compile_advanced_ml_model():
-    # Columns: length, has_at, subdomains, has_dash, entropy, has_token, is_ssl, is_ip_masked, result
     training_data = [
-        # --- SAFE (0): normal domains, valid SSL, no IP-masking ---
         [15, 0, 0, 0, 2.4, 0, 1, 0, 0], [18, 0, 1, 0, 2.7, 0, 1, 0, 0], [22, 0, 2, 0, 3.1, 0, 1, 0, 0],
         [28, 0, 0, 0, 2.9, 0, 1, 0, 0], [25, 0, 1, 1, 3.2, 0, 1, 0, 0], [30, 0, 1, 1, 3.5, 0, 1, 0, 0],
         [33, 0, 1, 1, 3.76, 0, 1, 0, 0], [36, 0, 0, 1, 3.6, 0, 1, 0, 0], [40, 0, 1, 1, 3.9, 0, 1, 0, 0],
         [20, 0, 0, 1, 3.0, 0, 1, 0, 0], [29, 0, 2, 0, 3.4, 0, 1, 0, 0], [24, 0, 1, 0, 3.1, 0, 1, 0, 0],
         [16, 0, 0, 0, 2.2, 0, 1, 0, 0], [21, 0, 1, 0, 3.0, 0, 1, 0, 0], [27, 0, 0, 1, 3.3, 0, 1, 0, 0],
-        # --- SAFE but no HTTPS (older/legacy sites — still not automatically malicious) ---
         [19, 0, 0, 0, 2.6, 0, 0, 0, 0], [23, 0, 1, 0, 3.0, 0, 0, 0, 0],
-        # --- MALICIOUS (1): valid SSL is common now (free certs), keyword lures, high entropy, dashes ---
         [32, 0, 1, 2, 4.2, 1, 1, 0, 1], [45, 0, 0, 2, 4.1, 1, 1, 0, 1], [55, 0, 1, 2, 4.3, 1, 1, 0, 1],
         [72, 1, 2, 1, 4.5, 1, 1, 0, 1], [34, 0, 1, 2, 4.2, 1, 1, 0, 1], [17, 0, 1, 0, 4.4, 1, 1, 0, 1],
         [26, 0, 2, 1, 4.1, 1, 1, 0, 1], [38, 0, 1, 1, 4.0, 1, 1, 0, 1],
-        # --- MALICIOUS: no SSL at all (cheap/throwaway phishing infra) ---
         [30, 0, 1, 2, 4.3, 1, 0, 0, 1], [42, 0, 0, 2, 4.2, 1, 0, 0, 1],
-        # --- MALICIOUS: raw IP address hosts (classic evasion, near-certain risk) ---
         [15, 0, 0, 0, 3.8, 0, 1, 1, 1], [15, 0, 0, 0, 3.9, 1, 0, 1, 1], [18, 1, 0, 0, 4.0, 0, 1, 1, 1],
     ]
     features = ['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token', 'is_ssl', 'is_ip_masked']
@@ -74,16 +61,7 @@ def compile_advanced_ml_model():
 cyber_classifier = compile_advanced_ml_model()
 
 # 3. Live URLhaus Threat-Feed Check
-#    abuse.ch now REQUIRES a free Auth-Key for all API access (this changed —
-#    it used to be fully open). Get one free at https://auth.abuse.ch/
-#    (log in with Google/GitHub/etc, then generate an Auth-Key in your profile).
 def check_past_phishing_history(target_url, auth_key=None):
-    """
-    NOTE: URLhaus is a MALWARE-distribution feed, not a phishing blocklist.
-    It will rarely catch pure credential-phishing pages that host no malware
-    payload — that's expected, not a bug. Google Safe Browsing (below) is the
-    only feed in this app with dedicated SOCIAL_ENGINEERING (phishing) coverage.
-    """
     if not auth_key:
         return {"checked": False, "matched": False,
                 "status": "⚪ Skipped — no URLhaus Auth-Key configured (free at auth.abuse.ch)"}
@@ -144,7 +122,6 @@ def resolve_live_dns_ip(hostname):
         return "0.0.0.0", "🔴 Inactive / Blocked Server"
 
 def resolve_geolocation(ip_address):
-    """Live IP geolocation via ipapi.co — pure HTTPS, works reliably on Streamlit Community Cloud"""
     if ip_address == "0.0.0.0":
         return None
     try:
@@ -167,7 +144,7 @@ def resolve_geolocation(ip_address):
         pass
     return None
 
-# 4b. Live Domain Registration Lookup via RDAP (no key, pure HTTPS — reliable on Streamlit Cloud)
+# 4b. Live Domain Registration Lookup via RDAP
 def _base_domain_candidates(hostname):
     parts = hostname.split('.')
     candidates = [hostname]
@@ -184,7 +161,6 @@ def _parse_rdap_date(value):
         return None
 
 def resolve_whois_record(hostname):
-    """Live domain registration lookup via RDAP (rdap.org bootstrap) — HTTPS only, no raw sockets."""
     for candidate in _base_domain_candidates(hostname):
         try:
             resp = requests.get(f"https://rdap.org/domain/{candidate}", timeout=6,
@@ -233,14 +209,7 @@ def resolve_whois_record(hostname):
     return {"found": False, "error": "No RDAP record found — domain may be unregistered, or registry unreachable"}
 
 # 4b-2. Live Certificate Transparency Check via SSLMate's Cert Spotter API
-#       (pure HTTPS, no key needed for basic queries — far more stable than crt.sh)
 def check_cert_transparency(hostname):
-    """
-    Looks up how recently an SSL certificate was issued for this domain, using
-    public Certificate Transparency logs via Cert Spotter (SSLMate). A very
-    freshly-issued cert (e.g. same week) is a common signal for newly-stood-up
-    phishing infrastructure, since attackers often spin up domain + cert together.
-    """
     for candidate in _base_domain_candidates(hostname):
         try:
             resp = requests.get(
@@ -254,7 +223,6 @@ def check_cert_transparency(hostname):
             if not issuances:
                 return {"found": False, "status": "⚪ No certificates found in CT logs for this domain"}
 
-            # Find the most recently issued certificate
             newest = None
             newest_dt = None
             for entry in issuances:
@@ -289,17 +257,10 @@ def check_cert_transparency(hostname):
             continue
     return {"found": False, "status": "⚪ Certificate Transparency lookup unavailable"}
 
-# 4c. Redirect Chain Tracer — follows shorteners/redirect hops to the real final page
+# 4c. Redirect Chain Tracer
 def _extract_client_side_redirect(html_text, base_url):
-    """
-    HTTP-level redirects (3xx) are only half the story. Many phishing kits use
-    a client-side bounce instead — a <meta http-equiv="refresh"> tag or a
-    window.location JS assignment — specifically because these are invisible
-    to tools that only follow HTTP status codes. This looks for both.
-    """
     from urllib.parse import urljoin
 
-    # <meta http-equiv="refresh" content="0;url=https://real-target.com">
     meta_match = re.search(
         r'<meta[^>]+http-equiv=["\']?refresh["\']?[^>]+content=["\']?\s*\d+\s*;\s*url\s*=\s*([^"\'>\s]+)',
         html_text, re.IGNORECASE
@@ -307,7 +268,6 @@ def _extract_client_side_redirect(html_text, base_url):
     if meta_match:
         return urljoin(base_url, meta_match.group(1).strip())
 
-    # window.location = "..." / window.location.href = "..." / location.replace("...")
     js_match = re.search(
         r'(?:window\.location(?:\.href)?\s*=\s*|location\.replace\s*\(\s*)["\']([^"\']+)["\']',
         html_text, re.IGNORECASE
@@ -318,12 +278,6 @@ def _extract_client_side_redirect(html_text, base_url):
     return None
 
 def trace_redirect_chain(url, max_hops=10):
-    """
-    Follows BOTH HTTP redirects (3xx — bit.ly, tinyurl, tracking hops, etc.)
-    AND client-side redirects (meta-refresh / JS window.location), which
-    plain HTTP-following misses entirely. Returns the full chain plus the
-    true final destination.
-    """
     chain = [url]
     current_url = url
     visited = set()
@@ -331,7 +285,7 @@ def trace_redirect_chain(url, max_hops=10):
     try:
         for _ in range(max_hops):
             if current_url in visited:
-                break  # redirect loop protection
+                break
             visited.add(current_url)
 
             resp = requests.get(
@@ -352,24 +306,21 @@ def trace_redirect_chain(url, max_hops=10):
                 if client_target and client_target != current_url and client_target not in chain:
                     chain.append(client_target)
                     current_url = client_target
-                    continue  # follow this next hop too
-            break  # no further redirect found — this is the true final page
+                    continue
+            break
 
         return chain[:max_hops], chain[-1]
     except Exception:
-        # Could not follow redirects (dead link, blocked, etc.) — scan original URL as-is
         return chain, url
 
 # 5. Core Lexical Calculation & Extended Heuristics Engine
 def normalize_host_for_comparison(url):
-    """Strips scheme/www/port so http->https or www upgrades aren't counted as 'real' redirects."""
     h = urlparse(url).netloc.lower().split(':')[0]
     if h.startswith('www.'):
         h = h[4:]
     return h
 
 def count_cross_domain_hops(chain):
-    """Counts only redirects that actually change the destination domain (ignores protocol/www upgrades)."""
     count = 0
     for i in range(len(chain) - 1):
         if normalize_host_for_comparison(chain[i]) != normalize_host_for_comparison(chain[i + 1]):
@@ -377,11 +328,6 @@ def count_cross_domain_hops(chain):
     return count
 
 def has_domain_drift(original_url, final_url):
-    """
-    True only if the link ends up on a genuinely different domain than what was typed/requested.
-    Auth-relay bounces that loop back to the SAME domain (common on Streamlit Cloud, OAuth flows,
-    session-cookie walls, etc.) are not drift — the visitor still lands where they expected.
-    """
     return normalize_host_for_comparison(original_url) != normalize_host_for_comparison(final_url)
 
 def extract_lexical_vectors(url):
@@ -407,7 +353,6 @@ def extract_lexical_vectors(url):
         wl in clean for wl in ['google.com', 'github.com', 'wikipedia.org', 'paypal.com']
     ) else 0
 
-    # Extended pro features
     is_ssl = 1 if parsed.scheme == 'https' else 0
     is_ip_masked = 1 if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", clean.split(':')[0]) else 0
 
@@ -415,7 +360,7 @@ def extract_lexical_vectors(url):
     pro_heuristics = {"is_ssl": is_ssl, "is_ip_masked": is_ip_masked}
     return features, host, pro_heuristics
 
-# 6. Unified scan pipeline — used by both Single Scan and Bulk Scan
+# 6. Unified scan pipeline
 def scan_url(user_target, gsb_key=None, urlhaus_key=None):
     original_url = user_target if user_target.startswith(('http://', 'https://')) else 'https://' + user_target
 
@@ -524,7 +469,7 @@ def build_single_scan_csv(result):
 def build_single_scan_pdf(result):
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
-        fig, ax = plt.subplots(figsize=(8.27, 11.69))  # A4 portrait
+        fig, ax = plt.subplots(figsize=(8.27, 11.69))
         ax.axis("off")
         fig.patch.set_facecolor('white')
 
@@ -614,7 +559,6 @@ SUSPICIOUS_EXTENSIONS = {
 }
 
 def calculate_file_entropy(data: bytes) -> float:
-    """Shannon entropy (0-8). High entropy (>7.5) suggests packed/encrypted/compressed payloads."""
     if not data:
         return 0.0
     counts = Counter(data)
@@ -673,7 +617,6 @@ def scan_uploaded_file(uploaded_file):
     ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
     is_suspicious_ext = ext in SUSPICIOUS_EXTENSIONS
 
-    # Local static-analysis risk scoring (0-100)
     risk = 5.0
     if mismatch:
         risk += 40.0
@@ -727,11 +670,6 @@ def build_file_scan_csv(fresult):
     return buf.getvalue().encode("utf-8")
 
 # 8. API keys — read from server-side secrets, never shown to end users.
-#    Configure these in Streamlit Cloud: App settings -> Secrets -> add:
-#        GSB_API_KEY = "your-google-safe-browsing-key-here"
-#        URLHAUS_AUTH_KEY = "your-urlhaus-auth-key-here"
-#    (URLhaus free key: log in at https://auth.abuse.ch/ then generate an Auth-Key in your profile)
-#    If a key is missing, that specific check is silently skipped — everything else still runs.
 def get_gsb_api_key():
     try:
         return st.secrets.get("GSB_API_KEY", "")
@@ -774,7 +712,6 @@ with tab_single:
             urlhaus_result = result["urlhaus_result"]
             gsb_result = result["gsb_result"]
 
-            # METRICS & ANALYSIS DASHBOARD
             st.write("---")
             st.write("### 📊 Automated Threat Analysis Report")
 
@@ -810,7 +747,6 @@ with tab_single:
 
             st.write("---")
 
-            # PRO FEATURE: Live Threat Feed Results
             st.write("#### 📡 Live Threat Feed Results:")
             tf_col1, tf_col2 = st.columns(2)
             with tf_col1:
@@ -820,7 +756,6 @@ with tab_single:
 
             st.write("---")
 
-            # PRO FEATURE: Redirect Chain Tracing
             st.write("#### 🔀 Redirect Chain Trace:")
             if len(redirect_chain) > 1:
                 if domain_drift:
@@ -849,11 +784,6 @@ with tab_single:
 
             st.write("---")
 
-            # AI PREDICTION OUTPUT — the model's own, standalone opinion.
-            # This is intentionally kept SEPARATE from the composite "Scanner
-            # Status" badge above: that badge blends live threat feeds, WHOIS,
-            # certs, and redirects. This section shows only what the trained
-            # structural model itself thinks, based purely on URL shape.
             st.write("#### 🧠 AI Prediction Output (structural model only):")
             ml_confidence = round(ml_phish_probability * 100, 1)
             ml_verdict = "🔴 Suspicious Structure" if ml_phish_probability >= 0.5 else "🟢 Normal Structure"
@@ -874,7 +804,6 @@ with tab_single:
 
             st.write("---")
 
-            # PRO FEATURE: Live IP Geolocation
             st.write("#### 🗺️ Live Server Geolocation:")
             if geo_info:
                 g_col1, g_col2 = st.columns(2)
@@ -893,7 +822,6 @@ with tab_single:
 
             st.write("---")
 
-            # PRO FEATURE: Full WHOIS registration history
             st.write("#### 📜 Full WHOIS Registration History:")
             if whois_info.get("found"):
                 st.write(f"📅 **Domain Age Assessment:** {whois_info['age_status']}")
@@ -913,7 +841,6 @@ with tab_single:
 
             st.write("---")
 
-            # PRO FEATURE: Certificate Transparency (Cert Spotter)
             st.write("#### 🔏 Certificate Transparency Check:")
             cert_info = result["cert_info"]
             st.write(cert_info["status"])
@@ -926,7 +853,6 @@ with tab_single:
 
             st.write("---")
 
-            # PRO FEATURE: Advanced heuristics breakdown table
             st.write("#### 🔍 Structural Feature Breakdown Table:")
             breakdown_data = {
                 "Security Parameter Indicator": [
@@ -971,7 +897,6 @@ with tab_single:
             else:
                 st.success("✔ No live threat-feed matches or high-risk structural patterns were found in this scan.")
 
-            # PRO FEATURE: Downloadable report
             st.write("---")
             st.write("#### 📥 Export This Report:")
             d_col1, d_col2 = st.columns(2)
@@ -1022,7 +947,7 @@ with tab_bulk:
         if pasted_urls.strip():
             url_list.extend([u.strip() for u in pasted_urls.splitlines() if u.strip()])
 
-        url_list = list(dict.fromkeys(url_list))  # de-duplicate, preserve order
+        url_list = list(dict.fromkeys(url_list))
 
         if not url_list:
             st.info("Please upload a CSV or paste at least one URL to run a bulk scan.")
@@ -1195,3 +1120,12 @@ with tab_file:
             )
     else:
         st.info("Upload a file above, then click 'SCAN FILE NOW' to run the analysis.")
+
+# 10. Credit Footer
+st.write("---")
+st.markdown(
+    "<div style='text-align:center; color:#475569; font-size:13px; padding:14px 0 6px 0;'>"
+    "Built under the guidance of <span style='color:#94a3b8; font-weight:600;'>Arepally Sai Shanthan</span>"
+    "</div>",
+    unsafe_allow_html=True
+)
