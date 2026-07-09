@@ -197,6 +197,124 @@ def check_openphish(original_url, final_url):
     return {"checked": True, "matched": False,
             "status": f"🟢 No match — not present in OpenPhish's current feed ({len(feed_set)} active phishing URLs tracked)"}
 
+# 3d. NEW — VirusTotal (real multi-engine aggregator, 70+ AV/blocklist vendors)
+# Free public API: 500 requests/day, 4/min. Needs a free API key from virustotal.com.
+# For URLs: try to fetch an existing report first (no quota cost beyond 1 request); if VT has
+# never seen this URL before, submit it for a fresh analysis and poll briefly for the result.
+import base64
+
+def _vt_headers(api_key):
+    return {"x-apikey": api_key, "User-Agent": "ThreatX-GlobalGuard/16.0"}
+
+def check_virustotal_url(target_url, api_key):
+    if not api_key:
+        return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                "harmless": 0, "undetected": 0, "total_engines": 0,
+                "status": "⚪ Skipped — no VirusTotal API key configured"}
+    try:
+        url_id = base64.urlsafe_b64encode(target_url.encode()).decode().strip("=")
+        resp = requests.get(f"https://www.virustotal.com/api/v3/urls/{url_id}",
+                             headers=_vt_headers(api_key), timeout=10)
+
+        if resp.status_code == 429:
+            return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                    "harmless": 0, "undetected": 0, "total_engines": 0,
+                    "status": "⚪ VirusTotal rate limit hit (free tier: 4 req/min, 500/day) — try again shortly"}
+        if resp.status_code == 404:
+            # VT has never analyzed this exact URL — submit it fresh and poll briefly.
+            submit_resp = requests.post("https://www.virustotal.com/api/v3/urls",
+                                         headers=_vt_headers(api_key),
+                                         data={"url": target_url}, timeout=10)
+            if submit_resp.status_code not in (200, 201):
+                return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                        "harmless": 0, "undetected": 0, "total_engines": 0,
+                        "status": f"⚪ VirusTotal submission failed (HTTP {submit_resp.status_code})"}
+            analysis_id = submit_resp.json().get("data", {}).get("id")
+            if not analysis_id:
+                return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                        "harmless": 0, "undetected": 0, "total_engines": 0,
+                        "status": "⚪ VirusTotal submission returned no analysis id"}
+
+            import time as _time
+            stats = None
+            for _ in range(6):  # poll up to ~12s — engines usually finish fast for URLs
+                _time.sleep(2)
+                poll = requests.get(f"https://www.virustotal.com/api/v3/analyses/{analysis_id}",
+                                    headers=_vt_headers(api_key), timeout=10)
+                if poll.status_code == 200:
+                    poll_data = poll.json().get("data", {}).get("attributes", {})
+                    if poll_data.get("status") == "completed":
+                        stats = poll_data.get("stats", {})
+                        break
+            if stats is None:
+                return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                        "harmless": 0, "undetected": 0, "total_engines": 0,
+                        "status": "⚪ VirusTotal analysis still pending — new URL, try scanning again shortly"}
+        elif resp.status_code == 200:
+            stats = resp.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+        else:
+            return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                    "harmless": 0, "undetected": 0, "total_engines": 0,
+                    "status": f"⚪ VirusTotal lookup failed (HTTP {resp.status_code})"}
+
+        malicious = stats.get("malicious", 0)
+        suspicious = stats.get("suspicious", 0)
+        harmless = stats.get("harmless", 0)
+        undetected = stats.get("undetected", 0)
+        total = malicious + suspicious + harmless + undetected
+
+        if malicious + suspicious > 0:
+            return {"checked": True, "matched": True, "malicious": malicious, "suspicious": suspicious,
+                    "harmless": harmless, "undetected": undetected, "total_engines": total,
+                    "status": f"🔴 VirusTotal: {malicious + suspicious}/{total} security vendors flag this URL as malicious/suspicious"}
+        return {"checked": True, "matched": False, "malicious": malicious, "suspicious": suspicious,
+                "harmless": harmless, "undetected": undetected, "total_engines": total,
+                "status": f"🟢 VirusTotal: 0/{total} security vendors flagged this URL"}
+    except Exception:
+        return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                "harmless": 0, "undetected": 0, "total_engines": 0,
+                "status": "⚪ VirusTotal request failed (network/timeout error)"}
+
+def check_virustotal_file(sha256_hash, api_key):
+    if not api_key:
+        return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                "harmless": 0, "undetected": 0, "total_engines": 0,
+                "status": "⚪ Skipped — no VirusTotal API key configured"}
+    try:
+        resp = requests.get(f"https://www.virustotal.com/api/v3/files/{sha256_hash}",
+                             headers=_vt_headers(api_key), timeout=10)
+        if resp.status_code == 429:
+            return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                    "harmless": 0, "undetected": 0, "total_engines": 0,
+                    "status": "⚪ VirusTotal rate limit hit (free tier: 4 req/min, 500/day) — try again shortly"}
+        if resp.status_code == 404:
+            return {"checked": True, "matched": False, "malicious": 0, "suspicious": 0,
+                    "harmless": 0, "undetected": 0, "total_engines": 0,
+                    "status": "🟡 VirusTotal has never seen this exact file before (unknown hash — not necessarily safe)"}
+        if resp.status_code != 200:
+            return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                    "harmless": 0, "undetected": 0, "total_engines": 0,
+                    "status": f"⚪ VirusTotal lookup failed (HTTP {resp.status_code})"}
+
+        stats = resp.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+        malicious = stats.get("malicious", 0)
+        suspicious = stats.get("suspicious", 0)
+        harmless = stats.get("harmless", 0)
+        undetected = stats.get("undetected", 0)
+        total = malicious + suspicious + harmless + undetected
+
+        if malicious + suspicious > 0:
+            return {"checked": True, "matched": True, "malicious": malicious, "suspicious": suspicious,
+                    "harmless": harmless, "undetected": undetected, "total_engines": total,
+                    "status": f"🔴 VirusTotal: {malicious + suspicious}/{total} antivirus engines flag this file as malicious/suspicious"}
+        return {"checked": True, "matched": False, "malicious": malicious, "suspicious": suspicious,
+                "harmless": harmless, "undetected": undetected, "total_engines": total,
+                "status": f"🟢 VirusTotal: 0/{total} antivirus engines flagged this file"}
+    except Exception:
+        return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                "harmless": 0, "undetected": 0, "total_engines": 0,
+                "status": "⚪ VirusTotal request failed (network/timeout error)"}
+
 # 4. Live DNS Host Resolver + IP Geolocation
 def resolve_live_dns_ip(hostname):
     try:
@@ -533,10 +651,11 @@ def extract_lexical_vectors(url):
     probs = [float(clean.count(c)) / len(clean) for c in set(clean)] if len(clean) > 0 else [0.0]
     entropy = -sum([p * math.log(p, 2) for p in probs]) if len(clean) > 0 else 0.0
 
-    tokens = ['login', 'verify', 'security', 'secure', 'billing', 'update', 'marketplace',
+    tokens = ['login', 'verify', 'verif', 'security', 'secure', 'billing', 'update', 'marketplace',
               'goog1e', 'faceb00k', 'netfliix', 'shekarius', '124', 'allegromt',
               'paypal', 'sbi', 'amazon', 'auth', 'portal', 'signin', 'account',
-              'webscr', 'cmd=', 'confirm', 'suspend', 'unlock', 'validate']
+              'webscr', 'cmd=', 'confirm', 'suspend', 'unlock', 'validate',
+              'credito', 'crediito', 'expertverif', 'sorteoficial', 'contemplado']
     whitelist = ['google.com', 'github.com', 'wikipedia.org', 'paypal.com',
                  'amazon.com', 'microsoft.com', 'apple.com']
     has_token = 1 if any(kw in clean for kw in tokens) and not any(
@@ -609,7 +728,7 @@ def extract_lexical_vectors(url):
     return features, host, pro_heuristics, phishing_signals
 
 # 6. Unified scan pipeline
-def scan_url(user_target, gsb_key=None, urlhaus_key=None):
+def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None):
     original_url = user_target if user_target.startswith(('http://', 'https://')) else 'https://' + user_target
 
     redirect_chain, final_url = trace_redirect_chain(original_url)
@@ -625,6 +744,7 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None):
     urlhaus_result = check_past_phishing_history(final_url, auth_key=urlhaus_key)
     gsb_result = check_google_safe_browsing(final_url, gsb_key)
     openphish_result = check_openphish(original_url, final_url)  # NEW — free live phishing feed
+    vt_result = check_virustotal_url(final_url, vt_key)  # NEW — real 70+ AV/blocklist vendor report
 
     eval_dataframe = pd.DataFrame(
         [feature_weights + [pro_meta["is_ssl"], pro_meta["is_raw_ip"]]],
@@ -673,6 +793,10 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None):
         dynamic_risk_weight += 50.0
     if openphish_result.get("matched"):
         dynamic_risk_weight += 45.0  # NEW — direct confirmed phishing match, very high confidence
+    if vt_result.get("matched"):
+        # Scale with how many vendors agree — 1 flag is weak signal, 10+ flags is near-certain.
+        vt_flags = vt_result.get("malicious", 0) + vt_result.get("suspicious", 0)
+        dynamic_risk_weight += min(55.0, 15.0 + (vt_flags * 4.0))
 
     # --- AI anomaly signal ---
     # Kept deliberately modest (unsupervised model = noisier signal), and only applied
@@ -695,11 +819,11 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None):
 
     if phishing_signals.get("is_suspicious_tld"):
         # Full weight only when combined with another signal — lone .online shop stays SAFE
-        dynamic_risk_weight += 20.0 if other_phish_signals >= 1 else 8.0
+        dynamic_risk_weight += 24.0 if other_phish_signals >= 1 else 12.0
 
     if phishing_signals.get("is_phishing_platform"):
         # Free hosting: mild alone; higher when paired with random subdomain, brand, or no-SSL
-        dynamic_risk_weight += 18.0 if other_phish_signals >= 1 else 8.0
+        dynamic_risk_weight += 22.0 if other_phish_signals >= 1 else 12.0
 
     if phishing_signals.get("is_random_platform_subdomain"):
         # Random/auto-generated subdomain on free hosting = strong phishing indicator
@@ -745,6 +869,7 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None):
         "urlhaus_result": urlhaus_result,
         "gsb_result": gsb_result,
         "openphish_result": openphish_result,
+        "vt_result": vt_result,
         "ml_phish_probability": ml_phish_probability,
         "is_structurally_anomalous": is_structurally_anomalous,
         "anomaly_raw_score": anomaly_raw_score,
@@ -774,6 +899,8 @@ def build_single_scan_csv(result):
         "Google Safe Browsing Match": result["gsb_result"].get("matched", False),
         "OpenPhish Checked OK": result["openphish_result"].get("checked", False),
         "OpenPhish Match": result["openphish_result"].get("matched", False),
+        "VirusTotal Vendors Flagged": f"{result['vt_result'].get('malicious', 0) + result['vt_result'].get('suspicious', 0)}/{result['vt_result'].get('total_engines', 0)}",
+        "VirusTotal Match": result["vt_result"].get("matched", False),
         "Suspicious TLD": result.get("phishing_signals", {}).get("is_suspicious_tld", False),
         "Phishing Platform": result.get("phishing_signals", {}).get("is_phishing_platform", False),
         "Random Platform Subdomain": result.get("phishing_signals", {}).get("is_random_platform_subdomain", False),
@@ -1040,7 +1167,7 @@ def check_threatfox(sha256_hash: str) -> dict:
             "status": "⚪ ThreatFox lookup failed (network/timeout error)"
         }
 
-def scan_uploaded_file(uploaded_file):
+def scan_uploaded_file(uploaded_file, vt_key=None):
     file_bytes = uploaded_file.getvalue()
     filename = uploaded_file.name
     size_kb = round(len(file_bytes) / 1024, 1)
@@ -1056,6 +1183,7 @@ def scan_uploaded_file(uploaded_file):
     # FREE threat intelligence lookups — no API key needed
     malwarebazaar_result = check_malwarebazaar(sha256_hash)
     threatfox_result = check_threatfox(sha256_hash)
+    vt_result = check_virustotal_file(sha256_hash, vt_key)  # NEW — real 70+ AV engine report
 
     ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
     is_suspicious_ext = ext in SUSPICIOUS_EXTENSIONS
@@ -1076,6 +1204,9 @@ def scan_uploaded_file(uploaded_file):
         risk += 50.0
     if threatfox_result.get("matched"):
         risk += 45.0
+    if vt_result.get("matched"):
+        vt_flags = vt_result.get("malicious", 0) + vt_result.get("suspicious", 0)
+        risk += min(55.0, 15.0 + (vt_flags * 3.0))
 
     risk_percent = round(min(99.4, max(2.0, risk)), 1)
     safety_percent = round(100.0 - risk_percent, 1)
@@ -1097,6 +1228,7 @@ def scan_uploaded_file(uploaded_file):
         "is_suspicious_ext": is_suspicious_ext,
         "malwarebazaar_result": malwarebazaar_result,
         "threatfox_result": threatfox_result,
+        "vt_result": vt_result,
         "risk_percent": risk_percent,
         "safety_percent": safety_percent,
         "is_malicious_class": is_malicious_class,
@@ -1121,6 +1253,8 @@ def build_file_scan_csv(fresult):
         "MalwareBazaar Status": fresult["malwarebazaar_result"].get("status", "N/A"),
         "ThreatFox Match": fresult["threatfox_result"].get("matched", False),
         "ThreatFox Status": fresult["threatfox_result"].get("status", "N/A"),
+        "VirusTotal Vendors Flagged": f"{fresult['vt_result'].get('malicious', 0) + fresult['vt_result'].get('suspicious', 0)}/{fresult['vt_result'].get('total_engines', 0)}",
+        "VirusTotal Match": fresult["vt_result"].get("matched", False),
         "Scanned At (UTC)": fresult["scanned_at"],
     }
     buf = io.StringIO()
@@ -1140,8 +1274,15 @@ def get_urlhaus_auth_key():
     except Exception:
         return ""
 
+def get_vt_api_key():
+    try:
+        return st.secrets.get("VT_API_KEY", "")
+    except Exception:
+        return ""
+
 gsb_api_key = get_gsb_api_key()
 urlhaus_auth_key = get_urlhaus_auth_key()
+vt_api_key = get_vt_api_key()
 
 # 8b. User Console Interface — Single Scan / Bulk Scan / File Scan
 tab_single, tab_bulk, tab_file = st.tabs(["🔍 Single Scan", "📂 Bulk Scan", "🗂️ File Scan"])
@@ -1152,7 +1293,7 @@ with tab_single:
     if st.button("🔍 SCAN WEBSITE NOW"):
         if user_target:
             with st.spinner("Tracing redirects, checking threat feeds, WHOIS, geolocation, and running AI models..."):
-                result = scan_url(user_target, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key)
+                result = scan_url(user_target, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key, vt_key=vt_api_key)
 
             risk_percent = result["risk_percent"]
             safety_percent = result["safety_percent"]
@@ -1207,7 +1348,24 @@ with tab_single:
 
             st.write("---")
 
-            st.write("#### 📡 Live Threat Feed Results:")
+            st.write("#### 🛡️ VirusTotal — Multi-Vendor Detection Report:")
+            vt_result = result["vt_result"]
+            if vt_result.get("checked") and vt_result.get("total_engines", 0) > 0:
+                flagged = vt_result.get("malicious", 0) + vt_result.get("suspicious", 0)
+                total = vt_result["total_engines"]
+                vt_c1, vt_c2, vt_c3, vt_c4 = st.columns(4)
+                vt_c1.metric("🔴 Malicious", vt_result.get("malicious", 0))
+                vt_c2.metric("🟠 Suspicious", vt_result.get("suspicious", 0))
+                vt_c3.metric("🟢 Harmless", vt_result.get("harmless", 0))
+                vt_c4.metric("⚪ Undetected", vt_result.get("undetected", 0))
+                if flagged > 0:
+                    st.error(f"🔴 **{flagged}/{total} security vendors** flagged this URL as malicious or suspicious.")
+                else:
+                    st.success(f"✅ **0/{total} security vendors** flagged this URL — clean across all engines VirusTotal aggregates.")
+            else:
+                st.write(vt_result.get("status", "⚪ VirusTotal not available"))
+
+            st.write("#### 📡 Other Live Threat Feed Results:")
             tf_col1, tf_col2, tf_col3 = st.columns(3)
             with tf_col1:
                 st.write(f"📝 **URLhaus (Malware DB):** {urlhaus_result['status']}")
@@ -1453,7 +1611,7 @@ with tab_bulk:
             completed = 0
 
             def _scan_one(u):
-                return u, scan_url(u, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key)
+                return u, scan_url(u, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key, vt_key=vt_api_key)
 
             with ThreadPoolExecutor(max_workers=6) as executor:
                 futures = {executor.submit(_scan_one, u): u for u in url_list}
@@ -1472,6 +1630,8 @@ with tab_bulk:
                             "URLhaus Match": res["urlhaus_result"].get("matched", False),
                             "GSB Match": res["gsb_result"].get("matched", False),
                             "OpenPhish Match": res["openphish_result"].get("matched", False),
+                            "VirusTotal Vendors Flagged": f"{res['vt_result'].get('malicious', 0) + res['vt_result'].get('suspicious', 0)}/{res['vt_result'].get('total_engines', 0)}",
+                            "VirusTotal Match": res["vt_result"].get("matched", False),
                             "Suspicious TLD": ps.get("is_suspicious_tld", False),
                             "Phishing Platform": ps.get("is_phishing_platform", False),
                             "Random Platform Subdomain": ps.get("is_random_platform_subdomain", False),
@@ -1536,7 +1696,7 @@ with tab_file:
     if uploaded_file_scan is not None:
         if st.button("🔍 SCAN FILE NOW"):
             with st.spinner("Computing hashes, checking MalwareBazaar, ThreatFox, file signature and macros..."):
-                fresult = scan_uploaded_file(uploaded_file_scan)
+                fresult = scan_uploaded_file(uploaded_file_scan, vt_key=vt_api_key)
 
             st.write("---")
             st.write("### 📊 Automated File Threat Report")
@@ -1572,7 +1732,25 @@ with tab_file:
             plt.close(ffig)
 
             st.write("---")
-            st.write("#### 🛡️ Live Threat Intelligence Feed Results:")
+            st.write("#### 🛡️ VirusTotal — Multi-Engine Detection Report:")
+            vt_result = fresult["vt_result"]
+            if vt_result.get("checked") and vt_result.get("total_engines", 0) > 0:
+                vt_flagged = vt_result.get("malicious", 0) + vt_result.get("suspicious", 0)
+                vt_total = vt_result["total_engines"]
+                vfc1, vfc2, vfc3, vfc4 = st.columns(4)
+                vfc1.metric("🔴 Malicious", vt_result.get("malicious", 0))
+                vfc2.metric("🟠 Suspicious", vt_result.get("suspicious", 0))
+                vfc3.metric("🟢 Harmless", vt_result.get("harmless", 0))
+                vfc4.metric("⚪ Undetected", vt_result.get("undetected", 0))
+                if vt_flagged > 0:
+                    st.error(f"🔴 **{vt_flagged}/{vt_total} antivirus engines** flagged this file as malicious or suspicious.")
+                else:
+                    st.success(f"✅ **0/{vt_total} antivirus engines** flagged this file.")
+            else:
+                st.write(vt_result.get("status", "⚪ VirusTotal not available"))
+
+            st.write("---")
+            st.write("#### 🕵️ Other Free Threat Intelligence Feed Results:")
             mb_result = fresult["malwarebazaar_result"]
             tf_result = fresult["threatfox_result"]
             ti_col1, ti_col2 = st.columns(2)
@@ -1590,7 +1768,7 @@ with tab_file:
                     st.write(f"&nbsp;&nbsp;&nbsp;• **Threat Type:** `{tf_result.get('threat_type', 'N/A')}`")
                     st.write(f"&nbsp;&nbsp;&nbsp;• **Confidence:** `{tf_result.get('confidence', 'N/A')}%`")
                     st.write(f"&nbsp;&nbsp;&nbsp;• **First Seen:** `{tf_result.get('first_seen', 'N/A')}`")
-            if mb_result.get("matched") or tf_result.get("matched"):
+            if mb_result.get("matched") or tf_result.get("matched") or vt_result.get("matched"):
                 st.error("🚨 This file's SHA-256 hash is confirmed in live malware threat databases. Do NOT open or execute it.")
             elif mb_result.get("checked") and tf_result.get("checked"):
                 st.success("✅ SHA-256 hash not found in MalwareBazaar or ThreatFox — no known malware match.")
