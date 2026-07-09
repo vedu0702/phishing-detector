@@ -69,6 +69,21 @@ RAW_TRAINING_DATA = [
     [28, 0, 2, 0, 3.3, 0, 1, 0, 0], [22, 0, 0, 1, 3.05, 0, 1, 0, 0],
     [34, 0, 1, 0, 3.55, 0, 1, 0, 0], [18, 0, 1, 1, 2.85, 0, 1, 0, 0],
     [39, 0, 0, 0, 3.75, 0, 1, 0, 0], [25, 0, 2, 1, 3.25, 0, 1, 0, 0],
+    # NEW extra safe samples (v16.0) -- modern hosted-app naming shapes. Real SaaS/demo apps
+    # deployed on platforms like streamlit.app / vercel.app / netlify.app are almost always
+    # multi-word-hyphenated subdomains with naturally high entropy. Without these rows the
+    # model had ZERO safe examples in the dash+subdomain+high-entropy region, so it learned
+    # "dash + subdomain + entropy>3.6" == phishing purely by absence of counter-examples --
+    # this is what caused legitimate hosted apps (e.g. the scanner's own *.streamlit.app URL)
+    # to be misclassified as "Suspicious Structure" despite every live threat feed being clean.
+    [34, 0, 1, 1, 3.7, 0, 1, 0, 0], [29, 0, 1, 1, 3.65, 0, 1, 0, 0],
+    [37, 0, 1, 1, 3.85, 0, 1, 0, 0], [31, 0, 1, 1, 3.75, 0, 1, 0, 0],
+    [40, 0, 1, 1, 3.95, 0, 1, 0, 0], [26, 0, 1, 1, 3.6, 0, 1, 0, 0],
+    [35, 0, 2, 1, 3.9, 0, 1, 0, 0], [28, 0, 1, 1, 3.7, 0, 1, 0, 0],
+    [42, 0, 1, 1, 4.05, 0, 1, 0, 0], [33, 0, 2, 1, 3.8, 0, 1, 0, 0],
+    [38, 0, 1, 1, 4.0, 0, 1, 0, 0], [24, 0, 1, 1, 3.55, 0, 1, 0, 0],
+    [45, 0, 1, 1, 4.15, 0, 1, 0, 0], [30, 0, 1, 1, 3.68, 0, 1, 0, 0],
+    [36, 0, 2, 1, 3.92, 0, 1, 0, 0],
     # --- SUSPICIOUS / PHISHING (result=1) ---
     [32, 0, 1, 2, 4.2, 1, 1, 0, 1], [45, 0, 0, 2, 4.1, 1, 1, 0, 1],
     [55, 0, 1, 2, 4.3, 1, 1, 0, 1], [72, 1, 2, 1, 4.5, 1, 1, 0, 1],
@@ -608,13 +623,24 @@ PHISHING_TLDS = {
 }
 
 # Free hosting platforms abused by phishers
+# NEW (v16.0): added streamlit.app -- like vercel/netlify, it's free hosting that CAN be
+# abused, but it's also where the scanner itself lives plus thousands of legit demo apps.
+# See LOW_ABUSE_MAINSTREAM_PLATFORMS below -- these get a lower "alone" weight than
+# platforms with almost no legitimate use (e.g. byet.host), instead of being treated the same.
 PHISHING_PLATFORMS = [
     'vercel.app', 'framer.app', 'netlify.app', 'glitch.me',
     'web.app', 'firebaseapp.com', 'pages.dev', 'blogspot.com',
     'wordpress.com', 'weebly.com', 'wixsite.com', 'site123.me',
     'carrd.co', 'notion.site', 'gitbook.io', 'repl.co',
-    '000webhostapp.com', 'byet.host', 'infinityfreeapp.com'
+    '000webhostapp.com', 'byet.host', 'infinityfreeapp.com',
+    'streamlit.app'
 ]
+
+# Platforms with heavy mainstream legitimate use get a reduced "lone signal" weight so a
+# single ordinary hosted app isn't punished the same as an obscure free-host abused almost
+# exclusively for phishing kits.
+LOW_ABUSE_MAINSTREAM_PLATFORMS = {'vercel.app', 'netlify.app', 'web.app', 'firebaseapp.com',
+                                   'pages.dev', 'streamlit.app', 'glitch.me'}
 
 # Brand names phishers impersonate — checked in full URL (domain + path)
 IMPERSONATED_BRANDS = [
@@ -732,6 +758,9 @@ def extract_lexical_vectors(url):
 
     # 2. Free hosting platform used for phishing
     is_phishing_platform = any(platform in clean for platform in PHISHING_PLATFORMS)
+    # NEW (v16.0): flag whether the matched platform is a mainstream host with heavy
+    # legitimate use (streamlit.app, vercel.app, ...) -- used to soften the lone-signal weight.
+    is_mainstream_platform = any(platform in clean for platform in LOW_ABUSE_MAINSTREAM_PLATFORMS)
 
     # 2b. Random/auto-generated subdomain on free hosting platform
     is_random_platform_subdomain = False
@@ -779,6 +808,7 @@ def extract_lexical_vectors(url):
         "is_suspicious_tld": is_suspicious_tld,
         "tld": tld,
         "is_phishing_platform": is_phishing_platform,
+        "is_mainstream_platform": is_mainstream_platform,
         "is_random_platform_subdomain": is_random_platform_subdomain,
         "is_brand_impersonation": is_brand_impersonation,
         "has_multi_dash": has_multi_dash,
@@ -821,15 +851,17 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None):
     anomaly_raw_score = float(anomaly_detector.decision_function(eval_dataframe)[0])  # higher = more "normal"
     is_structurally_anomalous = anomaly_prediction == -1
 
-    dynamic_risk_weight = ml_phish_probability * 100.0
-
-    # --- Network signals ---
+    # --- Network signals (computed first so we know how much real corroboration exists
+    #     before deciding how much to trust the ML model alone) ---
+    network_risk = 0.0
     if resolved_ip == "0.0.0.0":
-        dynamic_risk_weight += 35.0
+        network_risk += 35.0
     if pro_meta["is_ssl"] == 0:
-        dynamic_risk_weight += 20.0
+        network_risk += 20.0
     if pro_meta["is_raw_ip"] == 1:
-        dynamic_risk_weight += 40.0
+        network_risk += 40.0
+
+    dynamic_risk_weight = 0.0
 
     # --- Domain age signals ---
     if whois_info.get("found") and whois_info.get("age_days") is not None:
@@ -870,6 +902,23 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None):
     if is_structurally_anomalous:
         dynamic_risk_weight += 12.0
 
+    # NEW (v16.0) — FIX for the "scanner flags itself" bug: the RandomForest score was being
+    # added at full strength even when it was the ONLY signal firing and every live threat feed
+    # (URLhaus/GSB/OpenPhish/VirusTotal/urlscan) plus network/WHOIS/cert checks were unanimously
+    # clean. A structural ML guess with zero real-world corroboration should never be able to
+    # push a totally clean site over the DANGEROUS line on its own.
+    live_feed_hit = any([urlhaus_result.get("matched"), gsb_result.get("matched"),
+                          openphish_result.get("matched"), vt_result.get("matched"),
+                          urlscan_result.get("matched")])
+    has_real_corroboration = (network_risk > 0 or live_feed_hit or domain_drift
+                               or (whois_info.get("found") and (whois_info.get("age_days") or 999) < 180)
+                               or (cert_info.get("found") and (cert_info.get("age_days") or 999) < 30))
+    ml_weight = ml_phish_probability * 100.0
+    if not has_real_corroboration:
+        # ML alone, no other evidence at all -- trust it at half strength only.
+        ml_weight *= 0.5
+    dynamic_risk_weight += ml_weight + network_risk
+
     # --- Phishing-specific heuristic signals ---
     # These use "combined signal" logic to avoid false positives on legitimate sites.
     # A single suspicious TLD or platform alone is NOT enough to trigger DANGEROUS.
@@ -888,8 +937,17 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None):
         dynamic_risk_weight += 24.0 if other_phish_signals >= 1 else 12.0
 
     if phishing_signals.get("is_phishing_platform"):
-        # Free hosting: mild alone; higher when paired with random subdomain, brand, or no-SSL
-        dynamic_risk_weight += 22.0 if other_phish_signals >= 1 else 12.0
+        # Free hosting: mild alone; higher when paired with random subdomain, brand, or no-SSL.
+        # NEW (v16.0): mainstream platforms (streamlit.app, vercel.app, etc.) get a further
+        # reduced base weight when they're the ONLY signal -- millions of legitimate apps
+        # live there, unlike obscure hosts almost exclusively used for phishing kits.
+        is_mainstream = phishing_signals.get("is_mainstream_platform", False)
+        if other_phish_signals >= 1:
+            dynamic_risk_weight += 22.0
+        elif is_mainstream:
+            dynamic_risk_weight += 5.0
+        else:
+            dynamic_risk_weight += 12.0
 
     if phishing_signals.get("is_random_platform_subdomain"):
         # Random/auto-generated subdomain on free hosting = strong phishing indicator
