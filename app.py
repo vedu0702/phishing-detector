@@ -29,7 +29,7 @@ st.markdown("""
     .stButton>button:hover { background-color: #00ccaa; box-shadow: 0px 0px 25px #00ffcc; transform: translateY(-1px); }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
+    header {visibility: hidden;}
     .stAppDeployButton {display:none;}
     </style>
     """, unsafe_allow_html=True)
