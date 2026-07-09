@@ -96,6 +96,12 @@ FEATURE_NAMES = ['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_t
 @st.cache_resource
 def compile_advanced_ml_model():
     df = pd.DataFrame(RAW_TRAINING_DATA, columns=FEATURE_NAMES + ['result'])
+    # FIX: `has_dash`/`has_at`/`has_token`/`is_ssl`/`is_raw_ip` are boolean features at inference
+    # time (always 0 or 1), but a few training rows had raw dash-counts (2, 3...) in that column.
+    # That parity mismatch let the model learn a spurious "more dashes = more phishing" scale that
+    # never occurs at inference. Clamp to true 0/1 so training matches what scan_url() ever sends.
+    for col in ['has_at', 'has_dash', 'has_token', 'is_ssl', 'is_raw_ip']:
+        df[col] = (df[col] > 0).astype(int)
     clf = RandomForestClassifier(n_estimators=250, max_depth=7, random_state=42)
     clf.fit(df[FEATURE_NAMES], df['result'])
     return clf
@@ -105,6 +111,8 @@ def compile_anomaly_detector():
     """Unsupervised second-opinion model — flags structurally 'weird' URLs even when
     they don't match any known phishing pattern in the supervised training set."""
     df = pd.DataFrame(RAW_TRAINING_DATA, columns=FEATURE_NAMES + ['result'])
+    for col in ['has_at', 'has_dash', 'has_token', 'is_ssl', 'is_raw_ip']:
+        df[col] = (df[col] > 0).astype(int)
     safe_only = df[df['result'] == 0][FEATURE_NAMES]
     iso = IsolationForest(n_estimators=200, contamination=0.12, random_state=42)
     iso.fit(safe_only)
@@ -275,6 +283,41 @@ def check_virustotal_url(target_url, api_key):
                 "harmless": 0, "undetected": 0, "total_engines": 0,
                 "status": "⚪ VirusTotal request failed (network/timeout error)"}
 
+# 3e. NEW — urlscan.io free public search (100% free, no signup/API key needed for search)
+# NOTE (be realistic about this): urlscan.io lets ANYONE query its public search index of URLs
+# other users/systems have already scanned, with no key and no hard rate limit for light use.
+# It does NOT let you submit a brand-new scan for free without an API key, so this only checks
+# whether the URL (or its domain) has already been seen/flagged by the community — a real extra
+# signal, not a fake one. Cached for 10 min per URL to be a good API citizen.
+@st.cache_data(ttl=600, show_spinner=False)
+def check_urlscan(target_url, target_domain):
+    try:
+        resp = requests.get(
+            "https://urlscan.io/api/v1/search/",
+            params={"q": f"domain:{target_domain}", "size": 20},
+            headers={"User-Agent": "ThreatX-GlobalGuard/16.0"},
+            timeout=8
+        )
+        if resp.status_code != 200:
+            return {"checked": False, "matched": False, "status": f"⚪ urlscan.io lookup failed (HTTP {resp.status_code})"}
+        results = resp.json().get("results", [])
+        if not results:
+            return {"checked": True, "matched": False,
+                    "status": "🟢 urlscan.io: no prior community scans found for this domain"}
+        malicious_hits = 0
+        for r in results:
+            verdicts = r.get("verdicts", {}) if isinstance(r, dict) else {}
+            overall = verdicts.get("overall", {}) if isinstance(verdicts, dict) else {}
+            if overall.get("malicious") is True:
+                malicious_hits += 1
+        if malicious_hits > 0:
+            return {"checked": True, "matched": True, "hits": malicious_hits, "total": len(results),
+                    "status": f"🔴 urlscan.io: {malicious_hits}/{len(results)} prior community scans of this domain flagged as malicious"}
+        return {"checked": True, "matched": False, "hits": 0, "total": len(results),
+                "status": f"🟢 urlscan.io: {len(results)} prior scans found for this domain, none flagged malicious"}
+    except Exception:
+        return {"checked": False, "matched": False, "status": "⚪ urlscan.io lookup failed (network/timeout error)"}
+
 def check_virustotal_file(sha256_hash, api_key):
     if not api_key:
         return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
@@ -348,13 +391,28 @@ def resolve_geolocation(ip_address):
     return None
 
 # 4b. Live Domain Registration Lookup via RDAP
+_COMMON_TWO_PART_SUFFIXES = {
+    'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'me.uk', 'net.uk',
+    'co.in', 'org.in', 'net.in', 'gov.in', 'co.jp', 'co.kr', 'co.nz', 'co.za',
+    'com.au', 'net.au', 'org.au', 'com.br', 'com.mx', 'com.sg', 'com.hk',
+    'co.id', 'co.th', 'com.tr', 'com.ar',
+}
+
 def _base_domain_candidates(hostname):
     # FIX: Strip port first
     hostname = hostname.split(':')[0].lower()
     parts = hostname.split('.')
     candidates = [hostname]
     if len(parts) > 2:
-        candidates.append('.'.join(parts[-2:]))
+        # FIX: naive "last two labels" broke on multi-part public suffixes like *.co.uk —
+        # e.g. "evil.example.co.uk" collapsed to "example.co.uk" instead of the registrable
+        # "example.co.uk" being correct only when the suffix truly is 2 labels; for a genuine
+        # 3-label host under a 2-label suffix we need the last 3 labels, not 2.
+        last_two = '.'.join(parts[-2:])
+        if last_two in _COMMON_TWO_PART_SUFFIXES and len(parts) > 3:
+            candidates.append('.'.join(parts[-3:]))
+        else:
+            candidates.append(last_two)
     return candidates
 
 def _parse_rdap_date(value):
@@ -658,7 +716,11 @@ def extract_lexical_vectors(url):
               'credito', 'crediito', 'expertverif', 'sorteoficial', 'contemplado']
     whitelist = ['google.com', 'github.com', 'wikipedia.org', 'paypal.com',
                  'amazon.com', 'microsoft.com', 'apple.com']
-    has_token = 1 if any(kw in clean for kw in tokens) and not any(
+    # FIX: some tokens (cmd=, webscr, confirm...) only ever appear in the path/query, not the
+    # hostname — checking `clean` (hostname only) made those tokens permanently dead. Check the
+    # full URL instead, while still only whitelisting on the hostname so a legit domain with a
+    # suspicious query string doesn't get a free pass.
+    has_token = 1 if any(kw in full_url_lower for kw in tokens) and not any(
         wl in clean for wl in whitelist) else 0
 
     is_ssl = 1 if parsed.scheme == 'https' else 0
@@ -745,6 +807,7 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None):
     gsb_result = check_google_safe_browsing(final_url, gsb_key)
     openphish_result = check_openphish(original_url, final_url)  # NEW — free live phishing feed
     vt_result = check_virustotal_url(final_url, vt_key)  # NEW — real 70+ AV/blocklist vendor report
+    urlscan_result = check_urlscan(final_url, host_domain)  # NEW — free community scan history, no key needed
 
     eval_dataframe = pd.DataFrame(
         [feature_weights + [pro_meta["is_ssl"], pro_meta["is_raw_ip"]]],
@@ -797,6 +860,9 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None):
         # Scale with how many vendors agree — 1 flag is weak signal, 10+ flags is near-certain.
         vt_flags = vt_result.get("malicious", 0) + vt_result.get("suspicious", 0)
         dynamic_risk_weight += min(55.0, 15.0 + (vt_flags * 4.0))
+    if urlscan_result.get("matched"):
+        # Free community-scan corroboration — moderate weight since it's crowd-sourced, not a vendor verdict.
+        dynamic_risk_weight += 18.0
 
     # --- AI anomaly signal ---
     # Kept deliberately modest (unsupervised model = noisier signal), and only applied
@@ -870,6 +936,7 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None):
         "gsb_result": gsb_result,
         "openphish_result": openphish_result,
         "vt_result": vt_result,
+        "urlscan_result": urlscan_result,
         "ml_phish_probability": ml_phish_probability,
         "is_structurally_anomalous": is_structurally_anomalous,
         "anomaly_raw_score": anomaly_raw_score,
@@ -901,6 +968,7 @@ def build_single_scan_csv(result):
         "OpenPhish Match": result["openphish_result"].get("matched", False),
         "VirusTotal Vendors Flagged": f"{result['vt_result'].get('malicious', 0) + result['vt_result'].get('suspicious', 0)}/{result['vt_result'].get('total_engines', 0)}",
         "VirusTotal Match": result["vt_result"].get("matched", False),
+        "urlscan.io Match": result["urlscan_result"].get("matched", False),
         "Suspicious TLD": result.get("phishing_signals", {}).get("is_suspicious_tld", False),
         "Phishing Platform": result.get("phishing_signals", {}).get("is_phishing_platform", False),
         "Random Platform Subdomain": result.get("phishing_signals", {}).get("is_random_platform_subdomain", False),
@@ -945,6 +1013,8 @@ def build_single_scan_pdf(result):
             f"URLhaus:              {result['urlhaus_result']['status']}",
             f"Google Safe Browsing:  {result['gsb_result']['status']}",
             f"OpenPhish (free feed): {result['openphish_result']['status']}",
+            f"VirusTotal:            {result['vt_result']['status']}",
+            f"urlscan.io (community): {result['urlscan_result']['status']}",
             f"Suspicious TLD:        {'Yes (' + result.get('phishing_signals', {}).get('tld', '') + ')' if result.get('phishing_signals', {}).get('is_suspicious_tld') else 'No'}",
             f"Free Hosting Platform: {'YES — phisher-abused platform' if result.get('phishing_signals', {}).get('is_phishing_platform') else 'No'}",
             f"Brand Impersonation:   {'YES — brand name in non-official URL' if result.get('phishing_signals', {}).get('is_brand_impersonation') else 'No'}",
@@ -1061,9 +1131,11 @@ def detect_macros(filename: str, file_bytes: bytes):
             return False, "✅ No embedded macros detected."
         elif file_bytes.startswith(b"\xD0\xCF\x11\xE0"):
             return None, "⚠️ Legacy Office binary format — macro presence could not be verified without extra libraries. Treat with caution."
+        return False, "✅ No embedded macros detected."
     except Exception:
-        pass
-    return False, "✅ No embedded macros detected."
+        # FIX: a parse failure means we genuinely could NOT verify — treat as unknown (risk-weighted),
+        # not as a clean pass. Previously this silently returned "safe", hiding malformed/malicious files.
+        return None, "⚠️ Could not parse this Office file to check for macros (corrupt or obfuscated archive) — treat with caution."
 
 # ============================================================================
 # FREE THREAT INTELLIGENCE — MalwareBazaar + ThreatFox (abuse.ch)
@@ -1111,6 +1183,11 @@ def check_malwarebazaar(sha256_hash: str) -> dict:
                     "matched": False,
                     "status": f"⚪ MalwareBazaar returned unexpected status: {query_status}"
                 }
+        return {
+            "checked": False,
+            "matched": False,
+            "status": f"⚪ MalwareBazaar lookup failed (HTTP {resp.status_code})"
+        }
     except Exception:
         return {
             "checked": False,
@@ -1149,6 +1226,11 @@ def check_threatfox(sha256_hash: str) -> dict:
                         "status": (f"🔴 Found in ThreatFox IOC database — Malware: '{malware}' | "
                                    f"Type: {threat_type} | Confidence: {confidence}%")
                     }
+                return {
+                    "checked": True,
+                    "matched": False,
+                    "status": "🟢 Not found in ThreatFox IOC database — no known threat association"
+                }
             elif query_status == "no_result":
                 return {
                     "checked": True,
@@ -1160,6 +1242,11 @@ def check_threatfox(sha256_hash: str) -> dict:
                 "matched": False,
                 "status": f"⚪ ThreatFox returned status: {query_status}"
             }
+        return {
+            "checked": False,
+            "matched": False,
+            "status": f"⚪ ThreatFox lookup failed (HTTP {resp.status_code})"
+        }
     except Exception:
         return {
             "checked": False,
@@ -1335,7 +1422,7 @@ with tab_single:
             fig_pie, ax = plt.subplots(figsize=(6, 2.4))
             fig_pie.patch.set_facecolor('#060814')
             ax.set_facecolor('#060814')
-            wedges, texts, autotexts = ax.pie(
+            _, texts, autotexts = ax.pie(
                 sizes, labels=labels, colors=colors, autopct='%1.1f%%',
                 startangle=90, textprops=dict(color="w", weight="bold", size=10),
                 wedgeprops=dict(width=0.4, edgecolor='#1e293b')
@@ -1366,13 +1453,16 @@ with tab_single:
                 st.write(vt_result.get("status", "⚪ VirusTotal not available"))
 
             st.write("#### 📡 Other Live Threat Feed Results:")
-            tf_col1, tf_col2, tf_col3 = st.columns(3)
+            urlscan_result = result["urlscan_result"]
+            tf_col1, tf_col2, tf_col3, tf_col4 = st.columns(4)
             with tf_col1:
                 st.write(f"📝 **URLhaus (Malware DB):** {urlhaus_result['status']}")
             with tf_col2:
                 st.write(f"🌐 **Google Safe Browsing:** {gsb_result['status']}")
             with tf_col3:
                 st.write(f"🎣 **OpenPhish (Free Feed):** {openphish_result['status']}")
+            with tf_col4:
+                st.write(f"🔎 **urlscan.io (Community):** {urlscan_result['status']}")
 
             st.write("#### 🎯 Phishing Pattern Analysis:")
             ph_col1, ph_col2, ph_col3 = st.columns(3)
@@ -1632,6 +1722,7 @@ with tab_bulk:
                             "OpenPhish Match": res["openphish_result"].get("matched", False),
                             "VirusTotal Vendors Flagged": f"{res['vt_result'].get('malicious', 0) + res['vt_result'].get('suspicious', 0)}/{res['vt_result'].get('total_engines', 0)}",
                             "VirusTotal Match": res["vt_result"].get("matched", False),
+                            "urlscan.io Match": res["urlscan_result"].get("matched", False),
                             "Suspicious TLD": ps.get("is_suspicious_tld", False),
                             "Phishing Platform": ps.get("is_phishing_platform", False),
                             "Random Platform Subdomain": ps.get("is_random_platform_subdomain", False),
@@ -1720,7 +1811,7 @@ with tab_file:
             ffig, fax = plt.subplots(figsize=(6, 2.4))
             ffig.patch.set_facecolor('#060814')
             fax.set_facecolor('#060814')
-            f_wedges, f_texts, f_autotexts = fax.pie(
+            _, f_texts, f_autotexts = fax.pie(
                 sizes, labels=labels, colors=colors, autopct='%1.1f%%',
                 startangle=90, textprops=dict(color="w", weight="bold", size=10),
                 wedgeprops=dict(width=0.4, edgecolor='#1e293b')
