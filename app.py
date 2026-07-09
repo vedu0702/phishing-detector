@@ -422,6 +422,26 @@ def extract_lexical_vectors(url):
     # 2. Free hosting platform used for phishing
     is_phishing_platform = any(platform in clean for platform in PHISHING_PLATFORMS)
 
+    # 2b. Random/auto-generated subdomain on free hosting platform
+    # Phishers use Vercel/Framer/Netlify etc. with either:
+    #   a) adjective-noun-NUMBERS (loyal-raccoon-022802) — auto-generated deployment names
+    #   b) long single-word gibberish (uiuasorteofficial, seudiacontemplado) — no brand meaning
+    # Legitimate startups use short, meaningful, human-readable subdomains.
+    is_random_platform_subdomain = False
+    if is_phishing_platform:
+        subdomain_part = ""
+        for platform in PHISHING_PLATFORMS:
+            if clean.endswith(f".{platform}"):
+                subdomain_part = clean[: -(len(platform) + 1)]
+                if "." in subdomain_part:
+                    subdomain_part = subdomain_part.split(".")[-1]
+                break
+        if subdomain_part:
+            has_digit_seq    = bool(re.search(r"\d{3,}", subdomain_part))    # 022802, 964590
+            has_dash_digit   = bool(re.search(r"-\d{2,}", subdomain_part))   # raccoon-022802
+            is_long_one_word = len(subdomain_part) > 15 and "-" not in subdomain_part  # uiuasorteofficial
+            is_random_platform_subdomain = has_digit_seq or has_dash_digit or is_long_one_word
+
     # 3. Brand impersonation: brand name in HOSTNAME only (not path — avoids false positives
     #    like amazon.com/review-about-paypal flagging as paypal impersonation)
     OFFICIAL_BRAND_DOMAINS = {
@@ -490,6 +510,7 @@ def extract_lexical_vectors(url):
         "is_suspicious_tld": is_suspicious_tld,
         "tld": tld,
         "is_phishing_platform": is_phishing_platform,
+        "is_random_platform_subdomain": is_random_platform_subdomain,
         "is_brand_impersonation": is_brand_impersonation,
         "has_multi_dash": has_multi_dash,
         "has_numeric_subdomain": has_numeric_subdomain,
@@ -558,31 +579,35 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None):
     # These use "combined signal" logic to avoid false positives on legitimate sites.
     # A single suspicious TLD or platform alone is NOT enough to trigger DANGEROUS.
     other_phish_signals = sum([
-        pro_meta["is_ssl"] == 0,                             # no SSL
+        pro_meta["is_ssl"] == 0,
         phishing_signals.get("is_brand_impersonation", False),
         phishing_signals.get("has_multi_dash", 0) == 1,
         phishing_signals.get("has_numeric_subdomain", 0) == 1,
+        phishing_signals.get("is_random_platform_subdomain", False),
         (whois_info.get("found") and (whois_info.get("age_days") or 999) < 90),
     ])
 
     if phishing_signals.get("is_suspicious_tld"):
-        # Full weight ONLY when combined with at least 1 other signal (e.g., no SSL or brand name)
-        # Lone .online/.xyz domain (legitimate shop) gets reduced penalty
+        # Full weight only when combined with another signal — lone .online shop stays SAFE
         dynamic_risk_weight += 20.0 if other_phish_signals >= 1 else 8.0
 
     if phishing_signals.get("is_phishing_platform"):
-        # Free hosting: mild penalty alone; higher when combined with brand/no-SSL
+        # Free hosting: mild alone; higher when paired with random subdomain, brand, or no-SSL
         dynamic_risk_weight += 18.0 if other_phish_signals >= 1 else 8.0
 
+    if phishing_signals.get("is_random_platform_subdomain"):
+        # Random/auto-generated subdomain on free hosting = strong phishing indicator
+        # e.g. loyal-raccoon-022802.framer.app, uiuasorteofficial.vercel.app
+        dynamic_risk_weight += 32.0
+
     if phishing_signals.get("is_brand_impersonation"):
-        # Brand name in non-official hostname: meaningful phishing signal
         dynamic_risk_weight += 25.0
 
     if phishing_signals.get("has_multi_dash"):
-        dynamic_risk_weight += 15.0   # docs----bank style
+        dynamic_risk_weight += 15.0
 
     if phishing_signals.get("has_numeric_subdomain"):
-        dynamic_risk_weight += 10.0   # facebook-seks-39 style
+        dynamic_risk_weight += 10.0
 
     risk_percent = round(min(99.4, max(4.2, dynamic_risk_weight)), 1)
     safety_percent = round(100.0 - risk_percent, 1)
@@ -635,6 +660,7 @@ def build_single_scan_csv(result):
         "Google Safe Browsing Match": result["gsb_result"].get("matched", False),
         "Suspicious TLD": result.get("phishing_signals", {}).get("is_suspicious_tld", False),
         "Phishing Platform": result.get("phishing_signals", {}).get("is_phishing_platform", False),
+        "Random Platform Subdomain": result.get("phishing_signals", {}).get("is_random_platform_subdomain", False),
         "Brand Impersonation": result.get("phishing_signals", {}).get("is_brand_impersonation", False),
         "Domain Age (days)": (result["whois_info"].get("age_days")
                               if result["whois_info"].get("age_days") is not None else "N/A"),
@@ -1072,14 +1098,16 @@ with tab_single:
                     st.success(f"✅ TLD `{tld_label}` — not suspicious")
             with ph_col2:
                 if phishing_signals.get('is_phishing_platform'):
-                    st.error("🔴 Free Hosting Platform — phishers abuse these (vercel/blogspot/framer etc.) +22 risk")
+                    st.error("🔴 Free Hosting Platform — phishers abuse these (vercel/blogspot/framer etc.)")
                 else:
                     st.success("✅ Not a known phishing hosting platform")
             with ph_col3:
                 if phishing_signals.get('is_brand_impersonation'):
-                    st.error("🔴 Brand Impersonation — brand name used in non-official URL +28 risk")
+                    st.error("🔴 Brand Impersonation — brand name in non-official hostname +25 risk")
                 else:
                     st.success("✅ No brand impersonation detected")
+            if phishing_signals.get('is_random_platform_subdomain'):
+                st.error("🔴 **Random/Auto-Generated Subdomain on Free Platform** — phishers deploy on vercel/framer/netlify with random subdomains like `loyal-raccoon-022802.framer.app` or long gibberish like `uiuasorteofficial.vercel.app` — +32 risk")
             if phishing_signals.get('has_multi_dash'):
                 st.warning("🟠 Multiple consecutive dashes in domain (e.g. docs----bank.gitbook.io) — common phishing trick +15 risk")
 
@@ -1300,6 +1328,7 @@ with tab_bulk:
                         "GSB Match": res["gsb_result"].get("matched", False),
                         "Suspicious TLD": ps.get("is_suspicious_tld", False),
                         "Phishing Platform": ps.get("is_phishing_platform", False),
+                        "Random Platform Subdomain": ps.get("is_random_platform_subdomain", False),
                         "Brand Impersonation": ps.get("is_brand_impersonation", False),
                         "Server IP": res["resolved_ip"],
                         "SSL": "Yes" if res["pro_meta"]["is_ssl"] else "No",
