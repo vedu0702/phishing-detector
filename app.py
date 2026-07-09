@@ -1144,7 +1144,7 @@ st.markdown("""
        target="_blank"
        class="guide-link"
        title="View LinkedIn Profile">
-       Mr. Arepally Sai Shanthan ↗
+       Mr. Arepally Sai Shanthan Sir ↗
     </a>
 </div>
 """, unsafe_allow_html=True)
