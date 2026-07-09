@@ -1124,12 +1124,27 @@ with tab_file:
 # 10. Credit Footer
 st.write("---")
 st.markdown("""
+<style>
+.guide-link {
+    color: #3b82f6;
+    font-weight: 600;
+    text-decoration: underline;
+    transition: 0.2s;
+}
+
+.guide-link:hover {
+    color: #2563eb;
+    cursor: pointer;
+}
+</style>
+
 <div style='text-align:center; color:#475569; font-size:20px; padding:14px 0 6px 0;'>
     Built under the guidance of
     <a href="https://www.linkedin.com/in/shanthan-5386a5112/"
        target="_blank"
-       style="color:#94a3b8; font-weight:600; text-decoration:none;">
-       Mr. Arepally Sai Shanthan
+       class="guide-link"
+       title="View LinkedIn Profile">
+       Mr. Arepally Sai Shanthan ↗
     </a>
 </div>
 """, unsafe_allow_html=True)
