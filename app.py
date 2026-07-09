@@ -1125,7 +1125,7 @@ with tab_file:
 st.write("---")
 st.markdown(
     "<div style='text-align:center; color:#475569; font-size:20px; padding:14px 0 6px 0;'>"
-    "Built under the guidance of <span style='color:#94a3b8; font-weight:600;'>Arepally Sai Shanthan</span>"
+    "Built under the guidance of <span style='color:#94a3b8; font-weight:600;'>Mr. Arepally Sai Shanthan Sir</span>"
     "</div>",
     unsafe_allow_html=True
 )
