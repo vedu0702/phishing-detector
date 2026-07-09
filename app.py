@@ -355,25 +355,51 @@ def count_cross_domain_hops(chain):
 def has_domain_drift(original_url, final_url):
     return normalize_host_for_comparison(original_url) != normalize_host_for_comparison(final_url)
 
+# Phishing-specific constants
+PHISHING_TLDS = {
+    '.click', '.online', '.top', '.tk', '.ml', '.ga', '.cf', '.gq',
+    '.xyz', '.pw', '.cc', '.icu', '.live', '.support', '.security',
+    '.verify', '.bank', '.update', '.work', '.link', '.ltd', '.vip',
+    '.win', '.loan', '.download', '.accountant', '.trade', '.racing',
+    '.review', '.date', '.faith', '.cricket', '.party', '.science',
+    '.men', '.bid', '.webcam', '.stream', '.gdn', '.buzz'
+}
+
+# Free hosting platforms abused by phishers
+PHISHING_PLATFORMS = [
+    'vercel.app', 'framer.app', 'netlify.app', 'glitch.me',
+    'web.app', 'firebaseapp.com', 'pages.dev', 'blogspot.com',
+    'wordpress.com', 'weebly.com', 'wixsite.com', 'site123.me',
+    'carrd.co', 'notion.site', 'gitbook.io', 'repl.co',
+    '000webhostapp.com', 'byet.host', 'infinityfreeapp.com'
+]
+
+# Brand names phishers impersonate — checked in full URL (domain + path)
+IMPERSONATED_BRANDS = [
+    'paypal', 'amazon', 'apple', 'microsoft', 'google', 'facebook',
+    'instagram', 'netflix', 'whatsapp', 'telegram', 'linkedin',
+    'twitter', 'tiktok', 'youtube', 'chase', 'wellsfargo', 'citibank',
+    'bankofamerica', 'barclays', 'hsbc', 'sbi', 'hdfc', 'icici',
+    'coinbase', 'binance', 'metamask', 'trezor', 'ledger', 'kraken',
+    'dropbox', 'onedrive', 'icloud', 'outlook', 'office365', 'adobe'
+]
+
 def extract_lexical_vectors(url):
     if not url.startswith(('http://', 'https://')):
         url = 'https://' + url
 
     parsed = urlparse(url)
     host = parsed.netloc
-    # FIX: Always use clean (port-stripped, lowercased) for all calculations
     clean = host.lower().split(':')[0].strip()
+    full_url_lower = url.lower()
 
     length = len(clean)
     has_at = 1 if "@" in clean else 0
 
-    # FIX: Check if clean host is a raw IP first, then count subdomains correctly
     is_raw_ip = 1 if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", clean) else 0
-    # FIX: Don't count IP octets as subdomains
     subdomains = 0 if is_raw_ip else max(0, len(clean.split('.')) - 2)
     has_dash = 1 if "-" in clean else 0
 
-    # FIX: Entropy now uses `clean` (port-stripped) instead of raw `host`
     probs = [float(clean.count(c)) / len(clean) for c in set(clean)] if len(clean) > 0 else [0.0]
     entropy = -sum([p * math.log(p, 2) for p in probs]) if len(clean) > 0 else 0.0
 
@@ -381,16 +407,94 @@ def extract_lexical_vectors(url):
               'goog1e', 'faceb00k', 'netfliix', 'shekarius', '124', 'allegromt',
               'paypal', 'sbi', 'amazon', 'auth', 'portal', 'signin', 'account',
               'webscr', 'cmd=', 'confirm', 'suspend', 'unlock', 'validate']
+    whitelist = ['google.com', 'github.com', 'wikipedia.org', 'paypal.com',
+                 'amazon.com', 'microsoft.com', 'apple.com']
     has_token = 1 if any(kw in clean for kw in tokens) and not any(
-        wl in clean for wl in ['google.com', 'github.com', 'wikipedia.org', 'paypal.com',
-                                'amazon.com', 'microsoft.com', 'apple.com']
-    ) else 0
+        wl in clean for wl in whitelist) else 0
 
     is_ssl = 1 if parsed.scheme == 'https' else 0
 
+    # --- Extra phishing-specific signals (not in ML model, used in risk scoring) ---
+    # 1. Suspicious TLD check
+    tld = '.' + clean.split('.')[-1] if '.' in clean else ''
+    is_suspicious_tld = tld in PHISHING_TLDS
+
+    # 2. Free hosting platform used for phishing
+    is_phishing_platform = any(platform in clean for platform in PHISHING_PLATFORMS)
+
+    # 3. Brand impersonation: brand name in HOSTNAME only (not path — avoids false positives
+    #    like amazon.com/review-about-paypal flagging as paypal impersonation)
+    OFFICIAL_BRAND_DOMAINS = {
+        'paypal':     ['paypal.com', 'paypal.me', 'paypal.co.uk'],
+        'amazon':     ['amazon.com', 'amazon.co.uk', 'amazon.in', 'amazon.de', 'amazon.fr',
+                       'amazon.com.au', 'amazon.ca', 'amzn.to'],
+        'apple':      ['apple.com', 'icloud.com', 'mzstatic.com', 'apple.com.au'],
+        'microsoft':  ['microsoft.com', 'live.com', 'hotmail.com', 'outlook.com',
+                       'azure.com', 'office.com', 'msn.com', 'bing.com', 'skype.com'],
+        'google':     ['google.com', 'google.co.in', 'google.co.uk', 'google.com.au',
+                       'googleapis.com', 'googleusercontent.com', 'goo.gl'],
+        'facebook':   ['facebook.com', 'fb.com', 'fbcdn.net', 'facebook.net'],
+        'instagram':  ['instagram.com', 'cdninstagram.com'],
+        'netflix':    ['netflix.com', 'nflxext.com', 'nflximg.com'],
+        'whatsapp':   ['whatsapp.com', 'whatsapp.net'],
+        'telegram':   ['telegram.org', 't.me'],
+        'linkedin':   ['linkedin.com', 'licdn.com'],
+        'twitter':    ['twitter.com', 'x.com', 't.co', 'twimg.com'],
+        'tiktok':     ['tiktok.com', 'tiktokcdn.com'],
+        'youtube':    ['youtube.com', 'youtu.be', 'ytimg.com', 'googlevideo.com'],
+        'dropbox':    ['dropbox.com', 'dropboxstatic.com'],
+        'coinbase':   ['coinbase.com'],
+        'binance':    ['binance.com', 'binance.cc'],
+        'metamask':   ['metamask.io'],
+        'trezor':     ['trezor.io'],
+        'ledger':     ['ledger.com'],
+        'kraken':     ['kraken.com'],
+        'hdfc':       ['hdfcbank.com', 'hdfc.com', 'hdfcsec.com'],
+        'icici':      ['icicibank.com', 'icicidirect.com'],
+        'sbi':        ['sbi.co.in', 'onlinesbi.com', 'sbicards.com'],
+        'adobe':      ['adobe.com', 'adobecc.com'],
+        'onedrive':   ['onedrive.live.com', 'office.com'],
+        'icloud':     ['icloud.com', 'apple.com'],
+        'outlook':    ['outlook.com', 'outlook.live.com', 'microsoft.com'],
+        'office365':  ['office.com', 'microsoft.com', 'office365.com'],
+        'chase':      ['chase.com', 'jpmorgan.com'],
+        'wellsfargo': ['wellsfargo.com'],
+        'citibank':   ['citibank.com', 'citi.com'],
+        'bankofamerica': ['bankofamerica.com', 'bac.com'],
+        'barclays':   ['barclays.com', 'barclaysbank.com'],
+        'hsbc':       ['hsbc.com', 'hsbc.co.uk'],
+    }
+    brand_in_host = any(brand in clean for brand in IMPERSONATED_BRANDS)
+    is_official_brand = False
+    if brand_in_host:
+        for brand in IMPERSONATED_BRANDS:
+            if brand in clean:
+                official_domains = OFFICIAL_BRAND_DOMAINS.get(
+                    brand, [f'{brand}.com', f'www.{brand}.com']
+                )
+                if any(clean == od or clean == f"www.{od}" or clean.endswith(f".{od}")
+                       for od in official_domains):
+                    is_official_brand = True
+                    break
+    is_brand_impersonation = brand_in_host and not is_official_brand
+
+    # 4. Multiple consecutive dashes (e.g. docs----asuite-trezor.gitbook.io)
+    has_multi_dash = 1 if re.search(r'-{2,}', clean) else 0
+
+    # 5. Numeric subdomain/random looking domain
+    has_numeric_subdomain = 1 if re.search(r'\d{4,}', clean) else 0
+
     features = [length, has_at, subdomains, has_dash, round(entropy, 2), has_token]
     pro_heuristics = {"is_ssl": is_ssl, "is_raw_ip": is_raw_ip}
-    return features, host, pro_heuristics
+    phishing_signals = {
+        "is_suspicious_tld": is_suspicious_tld,
+        "tld": tld,
+        "is_phishing_platform": is_phishing_platform,
+        "is_brand_impersonation": is_brand_impersonation,
+        "has_multi_dash": has_multi_dash,
+        "has_numeric_subdomain": has_numeric_subdomain,
+    }
+    return features, host, pro_heuristics, phishing_signals
 
 # 6. Unified scan pipeline
 def scan_url(user_target, gsb_key=None, urlhaus_key=None):
@@ -400,7 +504,8 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None):
     cross_domain_hops = count_cross_domain_hops(redirect_chain)
     domain_drift = has_domain_drift(original_url, final_url)
 
-    feature_weights, host_domain, pro_meta = extract_lexical_vectors(final_url)
+    # Now returns 4 values including phishing_signals
+    feature_weights, host_domain, pro_meta, phishing_signals = extract_lexical_vectors(final_url)
     resolved_ip, dns_status_log = resolve_live_dns_ip(host_domain)
     geo_info = resolve_geolocation(resolved_ip)
     whois_info = resolve_whois_record(host_domain)
@@ -408,7 +513,6 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None):
     urlhaus_result = check_past_phishing_history(final_url, auth_key=urlhaus_key)
     gsb_result = check_google_safe_browsing(final_url, gsb_key)
 
-    # FIX: Updated column name from is_ip_masked → is_raw_ip to match training data
     eval_dataframe = pd.DataFrame(
         [feature_weights + [pro_meta["is_ssl"], pro_meta["is_raw_ip"]]],
         columns=['length', 'has_at', 'subdomains', 'has_dash', 'entropy', 'has_token', 'is_ssl', 'is_raw_ip']
@@ -417,35 +521,73 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None):
     ml_phish_probability = float(ml_probabilities[0][1])
 
     dynamic_risk_weight = ml_phish_probability * 100.0
+
+    # --- Network signals ---
     if resolved_ip == "0.0.0.0":
         dynamic_risk_weight += 35.0
     if pro_meta["is_ssl"] == 0:
-        dynamic_risk_weight += 15.0
-    # FIX: renamed is_ip_masked → is_raw_ip throughout
+        dynamic_risk_weight += 20.0
     if pro_meta["is_raw_ip"] == 1:
         dynamic_risk_weight += 40.0
+
+    # --- Domain age signals ---
     if whois_info.get("found") and whois_info.get("age_days") is not None:
         if whois_info["age_days"] < 30:
-            dynamic_risk_weight += 20.0
+            dynamic_risk_weight += 25.0
         elif whois_info["age_days"] < 180:
-            dynamic_risk_weight += 8.0
+            dynamic_risk_weight += 10.0
+
+    # --- Certificate signals ---
     if cert_info.get("found") and cert_info.get("age_days") is not None:
         if cert_info["age_days"] < 7:
             dynamic_risk_weight += 15.0
         elif cert_info["age_days"] < 30:
             dynamic_risk_weight += 6.0
+
+    # --- Redirect signals ---
     if domain_drift:
         dynamic_risk_weight += 20.0
+
+    # --- Threat feed signals (highest weight — live DB matches) ---
     if urlhaus_result.get("matched"):
         dynamic_risk_weight += 30.0
     if gsb_result.get("matched"):
-        dynamic_risk_weight += 45.0
+        dynamic_risk_weight += 50.0
+
+    # --- Phishing-specific heuristic signals ---
+    # These use "combined signal" logic to avoid false positives on legitimate sites.
+    # A single suspicious TLD or platform alone is NOT enough to trigger DANGEROUS.
+    other_phish_signals = sum([
+        pro_meta["is_ssl"] == 0,                             # no SSL
+        phishing_signals.get("is_brand_impersonation", False),
+        phishing_signals.get("has_multi_dash", 0) == 1,
+        phishing_signals.get("has_numeric_subdomain", 0) == 1,
+        (whois_info.get("found") and (whois_info.get("age_days") or 999) < 90),
+    ])
+
+    if phishing_signals.get("is_suspicious_tld"):
+        # Full weight ONLY when combined with at least 1 other signal (e.g., no SSL or brand name)
+        # Lone .online/.xyz domain (legitimate shop) gets reduced penalty
+        dynamic_risk_weight += 20.0 if other_phish_signals >= 1 else 8.0
+
+    if phishing_signals.get("is_phishing_platform"):
+        # Free hosting: mild penalty alone; higher when combined with brand/no-SSL
+        dynamic_risk_weight += 18.0 if other_phish_signals >= 1 else 8.0
+
+    if phishing_signals.get("is_brand_impersonation"):
+        # Brand name in non-official hostname: meaningful phishing signal
+        dynamic_risk_weight += 25.0
+
+    if phishing_signals.get("has_multi_dash"):
+        dynamic_risk_weight += 15.0   # docs----bank style
+
+    if phishing_signals.get("has_numeric_subdomain"):
+        dynamic_risk_weight += 10.0   # facebook-seks-39 style
 
     risk_percent = round(min(99.4, max(4.2, dynamic_risk_weight)), 1)
     safety_percent = round(100.0 - risk_percent, 1)
     is_malicious_class = True if risk_percent >= 45.0 else False
 
-    # FIX: Use timezone-aware UTC datetime (not deprecated utcnow)
     scanned_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     return {
@@ -458,6 +600,7 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None):
         "host_domain": host_domain,
         "feature_weights": feature_weights,
         "pro_meta": pro_meta,
+        "phishing_signals": phishing_signals,
         "resolved_ip": resolved_ip,
         "dns_status_log": dns_status_log,
         "geo_info": geo_info,
@@ -490,6 +633,9 @@ def build_single_scan_csv(result):
         "URLhaus Match": result["urlhaus_result"].get("matched", False),
         "GSB Checked OK": result["gsb_result"].get("checked", False),
         "Google Safe Browsing Match": result["gsb_result"].get("matched", False),
+        "Suspicious TLD": result.get("phishing_signals", {}).get("is_suspicious_tld", False),
+        "Phishing Platform": result.get("phishing_signals", {}).get("is_phishing_platform", False),
+        "Brand Impersonation": result.get("phishing_signals", {}).get("is_brand_impersonation", False),
         "Domain Age (days)": (result["whois_info"].get("age_days")
                               if result["whois_info"].get("age_days") is not None else "N/A"),
         "Registrar": result["whois_info"].get("registrar", "N/A"),
@@ -526,6 +672,9 @@ def build_single_scan_pdf(result):
             "-- Threat Intelligence --",
             f"URLhaus:              {result['urlhaus_result']['status']}",
             f"Google Safe Browsing:  {result['gsb_result']['status']}",
+            f"Suspicious TLD:        {'Yes (' + result.get('phishing_signals', {}).get('tld', '') + ')' if result.get('phishing_signals', {}).get('is_suspicious_tld') else 'No'}",
+            f"Free Hosting Platform: {'YES — phisher-abused platform' if result.get('phishing_signals', {}).get('is_phishing_platform') else 'No'}",
+            f"Brand Impersonation:   {'YES — brand name in non-official URL' if result.get('phishing_signals', {}).get('is_brand_impersonation') else 'No'}",
             "",
             "-- Network --",
             f"Server IP:    {result['resolved_ip']}  ({result['dns_status_log']})",
@@ -869,6 +1018,7 @@ with tab_single:
             ml_phish_probability = result["ml_phish_probability"]
             urlhaus_result = result["urlhaus_result"]
             gsb_result = result["gsb_result"]
+            phishing_signals = result.get("phishing_signals", {})
 
             st.write("---")
             st.write("### 📊 Automated Threat Analysis Report")
@@ -908,9 +1058,30 @@ with tab_single:
             st.write("#### 📡 Live Threat Feed Results:")
             tf_col1, tf_col2 = st.columns(2)
             with tf_col1:
-                st.write(f"📝 **URLhaus:** {urlhaus_result['status']}")
+                st.write(f"📝 **URLhaus (Malware DB):** {urlhaus_result['status']}")
             with tf_col2:
                 st.write(f"🌐 **Google Safe Browsing:** {gsb_result['status']}")
+
+            st.write("#### 🎯 Phishing Pattern Analysis:")
+            ph_col1, ph_col2, ph_col3 = st.columns(3)
+            with ph_col1:
+                tld_label = phishing_signals.get('tld', '')
+                if phishing_signals.get('is_suspicious_tld'):
+                    st.error(f"🔴 Suspicious TLD: `{tld_label}` (phishing-prone extension) +25 risk")
+                else:
+                    st.success(f"✅ TLD `{tld_label}` — not suspicious")
+            with ph_col2:
+                if phishing_signals.get('is_phishing_platform'):
+                    st.error("🔴 Free Hosting Platform — phishers abuse these (vercel/blogspot/framer etc.) +22 risk")
+                else:
+                    st.success("✅ Not a known phishing hosting platform")
+            with ph_col3:
+                if phishing_signals.get('is_brand_impersonation'):
+                    st.error("🔴 Brand Impersonation — brand name used in non-official URL +28 risk")
+                else:
+                    st.success("✅ No brand impersonation detected")
+            if phishing_signals.get('has_multi_dash'):
+                st.warning("🟠 Multiple consecutive dashes in domain (e.g. docs----bank.gitbook.io) — common phishing trick +15 risk")
 
             st.write("---")
 
@@ -1117,6 +1288,7 @@ with tab_bulk:
             for i, u in enumerate(url_list):
                 try:
                     res = scan_url(u, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key)
+                    ps = res.get("phishing_signals", {})
                     bulk_results.append({
                         "URL": res["input_url"],
                         "Final URL": res["final_url"],
@@ -1126,6 +1298,9 @@ with tab_bulk:
                         "Redirect Hops (Cross-Domain)": res["cross_domain_hops"],
                         "URLhaus Match": res["urlhaus_result"].get("matched", False),
                         "GSB Match": res["gsb_result"].get("matched", False),
+                        "Suspicious TLD": ps.get("is_suspicious_tld", False),
+                        "Phishing Platform": ps.get("is_phishing_platform", False),
+                        "Brand Impersonation": ps.get("is_brand_impersonation", False),
                         "Server IP": res["resolved_ip"],
                         "SSL": "Yes" if res["pro_meta"]["is_ssl"] else "No",
                         "Domain Age (days)": (res["whois_info"].get("age_days")
@@ -1136,8 +1311,9 @@ with tab_bulk:
                     bulk_results.append({
                         "URL": u, "Final URL": "ERROR", "Verdict": "⚪ SCAN FAILED",
                         "Risk %": "N/A", "Redirect Hops (Total)": "N/A", "Redirect Hops (Cross-Domain)": "N/A",
-                        "URLhaus Match": "N/A", "GSB Match": "N/A", "Server IP": "N/A",
-                        "SSL": "N/A", "Domain Age (days)": "N/A", "Country": "N/A",
+                        "URLhaus Match": "N/A", "GSB Match": "N/A",
+                        "Suspicious TLD": "N/A", "Phishing Platform": "N/A", "Brand Impersonation": "N/A",
+                        "Server IP": "N/A", "SSL": "N/A", "Domain Age (days)": "N/A", "Country": "N/A",
                     })
                 progress.progress((i + 1) / len(url_list), text=f"Scanning {i + 1} / {len(url_list)}...")
 
