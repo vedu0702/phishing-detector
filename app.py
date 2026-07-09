@@ -34,7 +34,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.write("<div style='text-align: center; padding-top: 10px;'><span style='font-size: 38px; font-weight: 800; color: #ffffff; letter-spacing: 1px;'>THREAT</span><span style='font-size: 38px; font-weight: 800; color: #00ffcc; letter-spacing: 1px;'>-X</span><span style='font-size: 14px; font-weight: bold; color: #475569; margin-left: 8px;'>GLOBAL GUARD PRO v15.0</span></div>", unsafe_allow_html=True)
+st.write("<div style='text-align: center; padding-top: 10px;'><span style='font-size: 38px; font-weight: 800; color: #ffffff; letter-spacing: 1px;'>THREAT</span><span style='font-size: 38px; font-weight: 800; color: #00ffcc; letter-spacing: 1px;'>-X</span><span style='font-size: 14px; font-weight: bold; color: #475569; margin-left: 8px;'>GLOBAL GUARD PRO v16.0</span></div>", unsafe_allow_html=True)
 st.write("<p style='text-align: center; color: #94a3b8; font-size: 15px; font-family: Arial;'>Enter any website address below to run a live scan across real threat-intelligence feeds, WHOIS, SSL, and redirect analysis.</p>", unsafe_allow_html=True)
 st.write("<p style='text-align: center; color: #64748b; font-size: 12px; font-family: Arial; font-style: italic;'>⚠️ This tool produces a heuristic + AI-assisted risk assessment, not a definitive legal or forensic verdict. Always use independent judgement before entering credentials on any site.</p>", unsafe_allow_html=True)
 st.write("---")
@@ -168,7 +168,7 @@ def check_google_safe_browsing(target_url, api_key):
         return {"checked": False, "matched": False, "status": "⚪ Skipped — no API key provided"}
     try:
         body = {
-            "client": {"clientId": "threat-x-global-guard", "clientVersion": "15.0"},
+            "client": {"clientId": "threat-x-global-guard", "clientVersion": "16.0"},
             "threatInfo": {
                 "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
                 "platformTypes": ["ANY_PLATFORM"],
@@ -200,7 +200,7 @@ def check_google_safe_browsing(target_url, api_key):
 def _fetch_openphish_feed():
     try:
         resp = requests.get("https://openphish.com/feed.txt", timeout=10,
-                             headers={"User-Agent": "ThreatX-GlobalGuard/15.0"})
+                             headers={"User-Agent": "ThreatX-GlobalGuard/16.0"})
         if resp.status_code == 200:
             return tuple(line.strip().rstrip('/') for line in resp.text.splitlines() if line.strip())
     except Exception:
@@ -1222,7 +1222,7 @@ def check_malwarebazaar(sha256_hash: str) -> dict:
         resp = requests.post(
             "https://mb-api.abuse.ch/api/v1/",
             data={"query": "get_info", "hash": sha256_hash},
-            headers={"User-Agent": "ThreatX-GlobalGuard/15.0"},
+            headers={"User-Agent": "ThreatX-GlobalGuard/16.0"},
             timeout=8
         )
         if resp.status_code == 200:
@@ -1276,7 +1276,7 @@ def check_threatfox(sha256_hash: str) -> dict:
         resp = requests.post(
             "https://threatfox-api.abuse.ch/api/v1/",
             json=payload,
-            headers={"User-Agent": "ThreatX-GlobalGuard/15.0"},
+            headers={"User-Agent": "ThreatX-GlobalGuard/16.0"},
             timeout=8
         )
         if resp.status_code == 200:
@@ -1543,7 +1543,7 @@ with tab_single:
             with ph_col1:
                 tld_label = phishing_signals.get('tld', '')
                 if phishing_signals.get('is_suspicious_tld'):
-                    st.error(f"🔴 Suspicious TLD: `{tld_label}` (phishing-prone extension) +8-20 risk")
+                    st.error(f"🔴 Suspicious TLD: `{tld_label}` (phishing-prone extension) +12-24 risk")
                 else:
                     st.success(f"✅ TLD `{tld_label}` — not suspicious")
             with ph_col2:
