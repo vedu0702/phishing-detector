@@ -716,7 +716,7 @@ def check_typosquatting(clean_host):
     is_typosquat = bool(best_match) and 0.82 <= best_ratio < 1.0 and host_no_www != best_match
     return is_typosquat, best_match, round(best_ratio, 3)
 
-def extract_lexical_vectors(url):
+def extract_lexical_vectors(url, domain_drift=False):
     if not url.startswith(('http://', 'https://')):
         url = 'https://' + url
 
@@ -735,19 +735,33 @@ def extract_lexical_vectors(url):
     probs = [float(clean.count(c)) / len(clean) for c in set(clean)] if len(clean) > 0 else [0.0]
     entropy = -sum([p * math.log(p, 2) for p in probs]) if len(clean) > 0 else 0.0
 
-    tokens = ['login', 'verify', 'verif', 'security', 'secure', 'billing', 'update', 'marketplace',
-              'goog1e', 'faceb00k', 'netfliix', 'shekarius', '124', 'allegromt',
-              'paypal', 'sbi', 'amazon', 'auth', 'portal', 'signin', 'account',
-              'webscr', 'cmd=', 'confirm', 'suspend', 'unlock', 'validate',
-              'credito', 'crediito', 'expertverif', 'sorteoficial', 'contemplado']
+    # NEW (v16.0) -- FIX for false "malicious keyword" flags on legit sites: generic
+    # session/brand words like "login", "auth", "account" show up constantly on real
+    # sites' own auth pages/redirects (e.g. Streamlit's own share.streamlit.io/auth relay
+    # that loops back to /login on the SAME app). Only obfuscation-style tokens (webscr,
+    # cmd=, goog1e, faceb00k, confirm, suspend, unlock, validate...) are inherently
+    # suspicious wherever they appear. Generic session words are only meaningful when the
+    # URL actually drifted to a different domain (genuine cross-domain phishing relay).
+    strong_tokens = ['webscr', 'cmd=', 'confirm', 'suspend', 'unlock', 'validate',
+                      'goog1e', 'faceb00k', 'netfliix', 'shekarius', '124', 'allegromt',
+                      'credito', 'crediito', 'expertverif', 'sorteoficial', 'contemplado']
+    weak_session_tokens = ['login', 'verify', 'verif', 'security', 'secure', 'billing',
+                            'update', 'marketplace', 'paypal', 'sbi', 'amazon', 'auth',
+                            'portal', 'signin', 'account']
     whitelist = ['google.com', 'github.com', 'wikipedia.org', 'paypal.com',
                  'amazon.com', 'microsoft.com', 'apple.com']
+    is_whitelisted = any(wl in clean for wl in whitelist)
     # FIX: some tokens (cmd=, webscr, confirm...) only ever appear in the path/query, not the
     # hostname — checking `clean` (hostname only) made those tokens permanently dead. Check the
     # full URL instead, while still only whitelisting on the hostname so a legit domain with a
     # suspicious query string doesn't get a free pass.
-    has_token = 1 if any(kw in full_url_lower for kw in tokens) and not any(
-        wl in clean for wl in whitelist) else 0
+    strong_token_match = any(kw in full_url_lower for kw in strong_tokens) and not is_whitelisted
+    # Weak/generic words: only count on the bare hostname (own auth/login pages are normal),
+    # or in the path/query when the URL genuinely drifted to a different domain first.
+    weak_token_match = (any(kw in clean for kw in weak_session_tokens)
+                         or (domain_drift and any(kw in full_url_lower for kw in weak_session_tokens))
+                         ) and not is_whitelisted
+    has_token = 1 if strong_token_match or weak_token_match else 0
 
     is_ssl = 1 if parsed.scheme == 'https' else 0
 
@@ -827,8 +841,10 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None):
     cross_domain_hops = count_cross_domain_hops(redirect_chain)
     domain_drift = has_domain_drift(original_url, final_url)
 
-    # Now returns 4 values including phishing_signals
-    feature_weights, host_domain, pro_meta, phishing_signals = extract_lexical_vectors(final_url)
+    # Now returns 4 values including phishing_signals. domain_drift is passed in so the
+    # keyword check can tell apart a site's own auth/login page (safe) from a genuine
+    # cross-domain phishing relay landing on a fake "login"/"verify" page.
+    feature_weights, host_domain, pro_meta, phishing_signals = extract_lexical_vectors(final_url, domain_drift=domain_drift)
     resolved_ip, dns_status_log = resolve_live_dns_ip(host_domain)
     geo_info = resolve_geolocation(resolved_ip)
     whois_info = resolve_whois_record(host_domain)
@@ -1667,7 +1683,8 @@ with tab_single:
                     "Triggered (Malicious Keywords Found)" if feature_weights[5] == 1 else "Clean Structural Patterns",
                     f"{feature_weights[3]} Structural Dash Elements Detected",
                     f"{feature_weights[2]} Segment Subdomains Layered",
-                    f"{cross_domain_hops} Cross-Domain Redirect Hop(s) Detected",
+                    (f"{cross_domain_hops} Cross-Domain Redirect Hop(s) Detected"
+                     + (" (loops back to original domain -- e.g. platform auth relay)" if cross_domain_hops >= 2 and not domain_drift else "")),
                 ],
                 "Risk Severity Rating": [
                     "✅ LOW RISK" if pro_meta["is_ssl"] == 1 else "⚠️ MEDIUM RISK ALERT",
@@ -1675,7 +1692,10 @@ with tab_single:
                     "⚠️ HIGH SUSPICION" if feature_weights[5] == 1 else "✅ SECURE INFRASTRUCTURE",
                     "⚠️ MINOR ANOMALY" if feature_weights[3] > 0 else "✅ SECURE INFRASTRUCTURE",
                     "⚠️ MEDIUM SUSPICION" if feature_weights[2] > 1 else "✅ SECURE INFRASTRUCTURE",
-                    "⚠️ MEDIUM SUSPICION" if cross_domain_hops >= 2 else "✅ SECURE INFRASTRUCTURE",
+                    # NEW (v16.0): a redirect chain that loops back to the SAME domain it
+                    # started from (e.g. platform login/session relay) is not risky -- only
+                    # flag when the chain actually drifts to a different final domain.
+                    "⚠️ MEDIUM SUSPICION" if (cross_domain_hops >= 2 and domain_drift) else "✅ SECURE INFRASTRUCTURE",
                 ]
             }
             st.table(pd.DataFrame(breakdown_data))
