@@ -1124,15 +1124,12 @@ with tab_file:
 # 10. Credit Footer
 st.write("---")
 st.markdown("""
-<div style='text-align:center; color:#475569; font-size:18px; padding:14px 0 6px 0;'>
+<div style='text-align:center; color:#475569; font-size:20px; padding:14px 0 6px 0;'>
     Built under the guidance of
-    <span style='color:#94a3b8; font-weight:600;'>
-        Mr. Arepally Sai Shanthan
-    </span><br>
     <a href="https://www.linkedin.com/in/shanthan-5386a5112/"
        target="_blank"
-       style="color:#3b82f6; text-decoration:none; font-size:16px;">
-       🔗 LinkedIn Profile
+       style="color:#94a3b8; font-weight:600; text-decoration:none;">
+       Mr. Arepally Sai Shanthan
     </a>
 </div>
 """, unsafe_allow_html=True)
