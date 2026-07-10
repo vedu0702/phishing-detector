@@ -2041,7 +2041,7 @@ with tab_single:
                     st.error(f"🔴 **{flagged}/{total} security vendors** flagged this URL as malicious or suspicious.")
                 else:
                     st.success(f"✅ **0/{total} security vendors** flagged this URL — clean across all engines VirusTotal aggregates.")
-                else:
+            else:
                     st.write(vt_result.get("status", "⚪ VirusTotal not available"))
                     if "pending" in vt_result.get("status", "").lower():
                         st.caption("This is a new/rarely-scanned URL — VirusTotal's background scan can take a minute. Refresh the page and re-scan the same link in a bit to see the final result.")
