@@ -2044,7 +2044,7 @@ with tab_single:
                     if st.button("🔄 Recheck VirusTotal now", key="vt_recheck_btn"):
                         st.session_state["_force_vt_recheck"] = True
                         st.rerun()
-                    st.caption("Note: After Click on 'Recheck VirusTotal now' Refresh the whole 'THREAT-XTool' and again click on 'SCAN WEBSITE NOW' you will get the results of VirusTotal. Thank You!")
+                    st.caption("Note: After clicking 'Recheck VirusTotal Now', please refresh the THREAT-X Tool, paste the website URL again, and click 'SCAN WEBSITE NOW' to fetch the updated VirusTotal results. Thank you!")
                     
             st.write("#### 📡 Other Live Threat Feed Results:")
             urlscan_result = result["urlscan_result"]
