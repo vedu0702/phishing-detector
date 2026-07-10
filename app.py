@@ -145,29 +145,22 @@ def render_screenshot_preview(target_url):
     before clicking through -- uses the free, keyless thum.io screenshot service. Best
     effort only: some sites block screenshot bots, in which case we just skip silently.
 
-    FIX v2: the first attempt used st.markdown(unsafe_allow_html=True) with inline
-    onload/onerror JS handlers, but Streamlit's frontend runs all markdown HTML through
-    DOMPurify, which silently strips inline event-handler attributes (onload/onerror) for
-    security -- so the spinner never got swapped out and just hung forever, and the
-    "\U0001F5BC" emoji escape wasn't interpreted inside a plain triple-quoted string either
-    (it needs an actual unicode literal, not the text "U0001F5BC"). Fixed both: the emoji is
-    now a real character, and the whole preview (spinner + image + swap script) is rendered
-    via components.v1.html(), which mounts in its own sandboxed iframe where inline <script>
-    tags and event handlers execute normally.
-
-    FIX v3 (two more bugs from v2):
-    1) The caption below the component was a *separate* st.caption() call, positioned by
-       Streamlit in the normal page flow right after the iframe. Because the iframe's height
-       was being measured/resized by JS at the same instant the caption was already laid out
-       by Streamlit, the two disagreed for a moment and the caption text visually landed on
-       top of the screenshot instead of cleanly below it. Fix: the caption is now rendered
-       *inside* the same iframe document, right under the image, so it is part of the exact
-       content whose height we measure -- there is no separate Streamlit element to go out of
-       sync with.
-    2) st.image() previously gave a free built-in fullscreen/expand icon on hover; switching
-       to a raw <img> tag for the loading-spinner fix silently dropped that. Fix: added our
-       own "⛶ Full screen" button overlaid on the corner of the screenshot that opens a
-       larger, uncropped version of the same live screenshot in a new browser tab.
+    FIX v4 (this round): the iframe's height was only ever updated via
+    `window.frameElement.style.height = ...`, with no try/catch and no fallback starting
+    height. On some deployed environments that line can throw/no-op silently (sandboxed
+    iframe access restrictions), so the resize never happens -- the iframe stays stuck at
+    whatever small starting height it had, clipping the screenshot image in half and
+    completely hiding the caption/disclaimer text below it (which made the screenshot
+    section look "glued" to the Risk Index chart right after it). Fixed by:
+      1) Giving components.html() a realistic starting height (560px) instead of 90px, so
+         even if the JS resize fails completely, nothing gets visually cut off.
+      2) Wrapping the resize call in try/catch so one failure can't kill the whole script.
+      3) Falling back to document.documentElement.scrollHeight if body.scrollHeight is 0
+         (some browsers report 0 for body height before layout settles).
+      4) Adding a MutationObserver so height re-syncs on ANY content change, not just the
+         handful of events (load/error/resize) we were listening to before.
+      5) Zeroing body margin -- the browser's default 8px body margin was quietly adding to
+         every scrollHeight measurement, so resized heights were always a bit off.
     """
     st.write("#### \U0001F5BC\uFE0F Live Site Preview (visual check before you click):")
     thumb_url = f"https://image.thum.io/get/width/700/crop/500/noanimate/{target_url}"
@@ -200,11 +193,14 @@ def render_screenshot_preview(target_url):
               ⛶ Full screen
             </button>
           </div>
-          <div id="thumb-caption" style="display: none; font-size: 13px; color: #94a3b8; margin-top: 8px;">
+          <div id="thumb-caption" style="display: none; font-size: 13px; color: #94a3b8; margin-top: 8px; padding-bottom: 4px;">
             Live screenshot of the destination page -- verify it visually matches what you expect before trusting it.
+            Never enter passwords, OTPs, or payment details on a site just because this preview looks familiar --
+            always double-check the URL itself too.
           </div>
         </div>
         <style>
+          html, body {{ margin: 0; padding: 0; }}
           @keyframes thumb-spin {{ to {{ transform: rotate(360deg); }} }}
           #thumb-fullscreen:hover {{ background: rgba(15,18,28,1); border-color: #00e0b8; }}
         </style>
@@ -214,37 +210,56 @@ def render_screenshot_preview(target_url):
             var wrap = document.getElementById('thumb-wrap');
             var loading = document.getElementById('thumb-loading');
             var caption = document.getElementById('thumb-caption');
-            // FIX: components.html() always reserves a fixed-height <iframe> in the page
-            // (we originally hardcoded height=520), so once the spinner was replaced by a
-            // much shorter "unavailable" message, or by an image shorter than 520px, a big
-            // dead blank gap was left behind below it. components.v1.html iframes are
-            // same-origin, so we can reach out to our own <iframe> element via
-            // window.frameElement and resize it to match the *actual* rendered content
-            // every time the content changes (loading -> loaded/error), instead of a
-            // static guess. Double requestAnimationFrame ensures we measure *after* the
-            // browser has finished laying out the just-revealed image, not before.
+
+            // FIX v4: never let a resize failure throw silently and stop everything else.
             function resizeToContent() {{
-              requestAnimationFrame(function() {{
+              try {{
                 requestAnimationFrame(function() {{
-                  if (window.frameElement) {{
-                    window.frameElement.style.height = document.body.scrollHeight + 'px';
-                  }}
+                  requestAnimationFrame(function() {{
+                    try {{
+                      var h = Math.max(
+                        document.body.scrollHeight || 0,
+                        document.documentElement.scrollHeight || 0
+                      );
+                      if (h > 0 && window.frameElement) {{
+                        window.frameElement.style.height = h + 'px';
+                      }}
+                    }} catch (innerErr) {{
+                      // Swallow -- worst case we keep the safe starting height set below.
+                    }}
+                  }});
                 }});
-              }});
+              }} catch (outerErr) {{
+                // Swallow -- same reasoning as above.
+              }}
             }}
+
             resizeToContent();
             window.addEventListener('resize', resizeToContent);
+
+            // FIX v4: catch ANY DOM change (display toggles, image swap, text change) instead
+            // of only the specific events we happened to think of.
+            try {{
+              var observer = new MutationObserver(resizeToContent);
+              observer.observe(document.body, {{ childList: true, subtree: true, attributes: true }});
+            }} catch (obsErr) {{
+              // MutationObserver should exist everywhere modern, but don't crash if not.
+            }}
+
             // Fallback in case thum.io hangs indefinitely: stop showing "loading" after 25s.
             var timeoutId = setTimeout(function() {{
               loading.innerHTML = '⚪ Live screenshot preview is taking unusually long -- the destination site may be blocking automated screenshots.';
               resizeToContent();
             }}, 25000);
+
             img.onload = function() {{
               clearTimeout(timeoutId);
               wrap.style.display = 'block';
               caption.style.display = 'block';
               loading.style.display = 'none';
               resizeToContent();
+              // One more delayed pass -- some browsers finish image layout a tick late.
+              setTimeout(resizeToContent, 150);
             }};
             img.onerror = function() {{
               clearTimeout(timeoutId);
@@ -254,7 +269,7 @@ def render_screenshot_preview(target_url):
           }})();
         </script>
         """,
-        height=90,
+        height=560,
     )
 
 def label_shortlink_hops(redirect_chain):
