@@ -349,7 +349,7 @@ st.markdown("""
         mask-image: linear-gradient(to bottom, rgba(0,0,0,0.9), rgba(0,0,0,0.15));
     }
 
-    
+    div.block-container { padding: 2rem 2rem 2rem 2rem; padding-left: 2rem; padding-right: 2rem; position: relative; z-index: 1; margin-left: auto; margin-right: auto; }
 
     h1, h2, h3, h4 { color: #f1f5ff; font-family: 'Inter', sans-serif; letter-spacing: 0.2px; }
 
