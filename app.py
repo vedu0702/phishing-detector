@@ -19,6 +19,170 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 # 1. Premium Enterprise UI Configuration
 st.set_page_config(page_title="Threat-X Global Guard Pro", page_icon="🛡️", layout="centered")
 
+import streamlit.components.v1 as components
+
+# NEW (v16.1) -- customer-facing deployments should not expose Streamlit's built-in
+# dev shortcuts ("r" = rerun, "c" = clear cache) or the hamburger menu (Deploy/Settings/
+# Clear cache) to end users -- a customer typing a URL that contains the letter "c" while
+# focus is outside the input box would otherwise pop the "Clear caches" dialog. This runs
+# a tiny same-origin script (Streamlit component iframes share the parent document) that
+# intercepts 'r'/'c' keydowns in the CAPTURE phase -- before Streamlit's own listener --
+# and swallows them whenever the user isn't typing inside a text box. No user-facing UI,
+# no server-side effect; purely a client-side guard.
+def _disable_dev_shortcuts():
+    components.html(
+        """
+        <script>
+        (function () {
+            var doc = window.parent.document;
+            if (doc.__threatxShortcutGuardInstalled) return;
+            doc.__threatxShortcutGuardInstalled = true;
+            doc.addEventListener("keydown", function (e) {
+                var key = (e.key || "").toLowerCase();
+                if (key !== "r" && key !== "c") return;
+                if (e.metaKey || e.ctrlKey || e.altKey) return;  // let Cmd/Ctrl+C copy still work
+                var el = doc.activeElement;
+                var tag = el ? el.tagName : "";
+                var isEditable = tag === "INPUT" || tag === "TEXTAREA" || (el && el.isContentEditable);
+                if (isEditable) return;  // typing inside a real text box is always allowed
+                e.stopPropagation();
+                e.preventDefault();
+            }, true);  // capture phase -- runs before Streamlit's own shortcut handler
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+_disable_dev_shortcuts()
+
+# ---------------------------------------------------------------------------
+# NEW (v16.2) helper utilities: result caching, screenshot preview, shortlink
+# labeling, multi-feed consensus badge, and user feedback logging.
+# ---------------------------------------------------------------------------
+
+KNOWN_SHORTENERS = {
+    "bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "buff.ly",
+    "rebrand.ly", "cutt.ly", "rb.gy", "shorturl.at", "tiny.cc", "lnkd.in",
+    "s.id", "v.gd", "shorte.st", "adf.ly", "bl.ink", "t.ly", "clck.ru",
+}
+
+SCAN_CACHE_TTL_SECONDS = 300  # 5 minutes -- avoids burning VT/GSB free-tier quota on repeat scans
+
+SCAN_CACHE_MAX_ENTRIES = 50  # FIX (review): unbounded session cache could grow forever in a long-lived session
+
+def _prune_scan_cache(cache):
+    import time as _time
+    now = _time.time()
+    expired = [k for k, (_, at) in cache.items() if now - at > SCAN_CACHE_TTL_SECONDS]
+    for k in expired:
+        del cache[k]
+    # If still over the cap after pruning expired entries, drop the oldest ones (simple LRU-by-insertion-time).
+    if len(cache) > SCAN_CACHE_MAX_ENTRIES:
+        for k, _ in sorted(cache.items(), key=lambda kv: kv[1][1])[:len(cache) - SCAN_CACHE_MAX_ENTRIES]:
+            del cache[k]
+
+def get_cached_scan(cache_key):
+    """Returns a cached scan_url() result if one exists and is still fresh, else None."""
+    import time as _time
+    cache = st.session_state.get("scan_cache", {})
+    _prune_scan_cache(cache)
+    entry = cache.get(cache_key)
+    if not entry:
+        return None
+    cached_result, cached_at = entry
+    if _time.time() - cached_at > SCAN_CACHE_TTL_SECONDS:
+        return None
+    return cached_result
+
+def set_cached_scan(cache_key, result):
+    import time as _time
+    cache = st.session_state.setdefault("scan_cache", {})
+    cache[cache_key] = (result, _time.time())
+    _prune_scan_cache(cache)
+
+def run_scan_cached(user_target, gsb_key=None, urlhaus_key=None, vt_key=None, force_refresh=False):
+    """Wraps scan_url() with a short-lived session cache so re-scanning the exact same URL
+    within a few minutes (e.g. clicking SCAN again, or the VirusTotal recheck button) does
+    not burn extra VirusTotal / Google Safe Browsing free-tier API quota."""
+    cache_key = user_target.strip().lower()
+    if not force_refresh:
+        cached = get_cached_scan(cache_key)
+        if cached is not None:
+            return cached, True
+    result = scan_url(user_target, gsb_key=gsb_key, urlhaus_key=urlhaus_key, vt_key=vt_key)
+    set_cached_scan(cache_key, result)
+    return result, False
+
+def compute_feed_consensus(result):
+    """Counts how many of the live threat feeds actively returned a usable (checked) result,
+    and how many of those came back clean -- powers the "X of Y feeds agree" badge."""
+    feed_results = [
+        result.get("urlhaus_result", {}),
+        result.get("gsb_result", {}),
+        result.get("openphish_result", {}),
+        result.get("vt_result", {}),
+        result.get("urlscan_result", {}),
+    ]
+    checked = [f for f in feed_results if f.get("checked")]
+    clean = [f for f in checked if not f.get("matched")]
+    return len(clean), len(checked)
+
+def render_screenshot_preview(target_url):
+    """Shows a live visual thumbnail of the destination site so the user can eyeball it
+    before clicking through -- uses the free, keyless thum.io screenshot service. Best
+    effort only: some sites block screenshot bots, in which case we just skip silently."""
+    st.write("#### U0001F5BC️ Live Site Preview (visual check before you click):")
+    thumb_url = f"https://image.thum.io/get/width/700/crop/500/noanimate/{target_url}"
+    try:
+        st.image(thumb_url, use_container_width=True,
+                 caption="Live screenshot of the destination page -- verify it visually matches what you expect before trusting it.")
+    except Exception:
+        st.caption("⚪ Live screenshot preview unavailable for this site right now.")
+
+def label_shortlink_hops(redirect_chain):
+    """Returns a set of indices in redirect_chain that are known URL-shortener hops,
+    so the UI can explicitly call them out (e.g. 'bit.ly link -- auto-expanded below')."""
+    shortlink_indices = set()
+    for i, hop in enumerate(redirect_chain):
+        host = normalize_host_for_comparison(hop)
+        if host in KNOWN_SHORTENERS:
+            shortlink_indices.add(i)
+    return shortlink_indices
+
+FEEDBACK_LOG_PATH = "feedback_log.csv"
+
+def _csv_safe(value):
+    """FIX (review): prefix a leading =,+,-,@ with a single quote so spreadsheet apps
+    (Excel/Sheets) never interpret user-supplied text as a formula when this CSV is opened."""
+    text = str(value)
+    if text and text[0] in ("=", "+", "-", "@"):
+        return "'" + text
+    return text
+
+def log_user_feedback(scanned_url, verdict, risk_percent, user_comment):
+    """Appends a user-reported 'this result was wrong' entry to a local CSV log. This is
+    intentionally simple (no automatic model retraining) -- it just preserves disagreements
+    so a human can review them later and decide whether the scoring weights need tuning.
+    FIX (review): wrapped in try/except so a disk/permission issue here can never crash the
+    rest of the app -- the user just sees a soft warning instead of a hard error."""
+    import csv, os
+    try:
+        file_exists = os.path.isfile(FEEDBACK_LOG_PATH)
+        with open(FEEDBACK_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(["timestamp_utc", "scanned_url", "scanner_verdict", "risk_percent", "user_comment"])
+            writer.writerow([
+                datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                _csv_safe(scanned_url), _csv_safe(verdict), risk_percent, _csv_safe(user_comment or ""),
+            ])
+        return True
+    except Exception:
+        return False
+
+
+
 st.markdown("""
     <style>
     .main { background-color: #060814; }
@@ -260,8 +424,13 @@ def check_virustotal_url(target_url, api_key):
 
             import time as _time
             stats = None
-            for _ in range(6):  # poll up to ~12s — engines usually finish fast for URLs
-                _time.sleep(2)
+            # FIX (v16.2): 30s caught more first-time results but users found the wait
+            # irritating for a quick security check. Trimmed to ~12s and paired with a
+            # one-click "Recheck VirusTotal" button in the UI (tab_single) so users are
+            # never stuck staring at a spinner -- they can retry in one tap once VT's
+            # background scan finishes.
+            for _ in range(6):  # poll up to ~12s -- keeps the spinner short and non-annoying
+                _time.sleep(2.0)
                 poll = requests.get(f"https://www.virustotal.com/api/v3/analyses/{analysis_id}",
                                     headers=_vt_headers(api_key), timeout=10)
                 if poll.status_code == 200:
@@ -1446,15 +1615,21 @@ urlhaus_auth_key = get_urlhaus_auth_key()
 vt_api_key = get_vt_api_key()
 
 # 8b. User Console Interface — Single Scan / Bulk Scan / File Scan
-tab_single, tab_bulk, tab_file = st.tabs(["🔍 Single Scan", "📂 Bulk Scan", "🗂️ File Scan"])
+tab_single, tab_bulk, tab_file, tab_email = st.tabs(["🔍 Single Scan", "📂 Bulk Scan", "🗂️ File Scan", "📧 Email Scan"])
 
 with tab_single:
     user_target = st.text_input("🔗 Enter website link here to analyze secure features:", placeholder="e.g., https://my-safe-website.com")
 
-    if st.button("🔍 SCAN WEBSITE NOW"):
+    _force_refresh_clicked = st.session_state.pop("_force_vt_recheck", False)
+
+    if st.button("🔍 SCAN WEBSITE NOW") or _force_refresh_clicked:
         if user_target:
-            with st.spinner("Tracing redirects, checking threat feeds, WHOIS, geolocation, and running AI models..."):
-                result = scan_url(user_target, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key, vt_key=vt_api_key)
+            with st.spinner("Tracing redirects, checking threat feeds, WHOIS, geolocation, and running AI models... (brand-new URLs take a little longer while VirusTotal finishes its background scan)"):
+                result, was_cached = run_scan_cached(user_target, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key,
+                                                      vt_key=vt_api_key, force_refresh=_force_refresh_clicked)
+            st.session_state["_last_scanned_target"] = user_target
+            if was_cached:
+                st.caption("⚡ Served from a 5-minute cache — same URL scanned recently, no extra API quota spent.")
 
             risk_percent = result["risk_percent"]
             safety_percent = result["safety_percent"]
@@ -1486,6 +1661,20 @@ with tab_single:
                 m_col1.metric(label="🛡️ SCANNER STATUS", value="✅ SAFE LINK", delta="CLEAN CERTIFICATE")
                 m_col2.metric(label="🚨 RISK PERCENTAGE", value=f"{risk_percent}%", delta="LOW RISK")
                 m_col3.metric(label="🟢 SAFETY FACTOR", value=f"{safety_percent}%", delta="SECURE OPERATIONS")
+
+            # NEW (v16.2) — "X of Y feeds agree" consensus badge, surfaced immediately at the
+            # top instead of being scattered across the report further down.
+            clean_feeds, total_checked_feeds = compute_feed_consensus(result)
+            if total_checked_feeds > 0:
+                if clean_feeds == total_checked_feeds:
+                    st.success(f"✅ **{clean_feeds} of {total_checked_feeds} live threat feeds agree** this URL is clean (URLhaus, Google Safe Browsing, OpenPhish, VirusTotal, urlscan.io).")
+                else:
+                    st.error(f"🔴 **Only {clean_feeds} of {total_checked_feeds} live threat feeds** came back clean — {total_checked_feeds - clean_feeds} feed(s) flagged this URL.")
+            else:
+                st.caption("⚪ No live threat feeds returned a usable result for this scan (check API keys / connectivity).")
+
+            # NEW (v16.2) — live visual screenshot so the user can eyeball the site before clicking.
+            render_screenshot_preview(result["final_url"])
 
             st.write("---")
 
@@ -1525,6 +1714,11 @@ with tab_single:
                     st.success(f"✅ **0/{total} security vendors** flagged this URL — clean across all engines VirusTotal aggregates.")
             else:
                 st.write(vt_result.get("status", "⚪ VirusTotal not available"))
+                if "pending" in vt_result.get("status", "").lower():
+                    st.caption("New/rarely-scanned URLs sometimes need a few extra seconds for VirusTotal's background scan to finish.")
+                    if st.button("🔄 Recheck VirusTotal now", key="vt_recheck_btn"):
+                        st.session_state["_force_vt_recheck"] = True
+                        st.rerun()
 
             st.write("#### 📡 Other Live Threat Feed Results:")
             urlscan_result = result["urlscan_result"]
@@ -1574,6 +1768,7 @@ with tab_single:
                     st.write(f"ℹ️ This link passes through {cross_domain_hops} intermediate domain(s) but loops back to the original domain (e.g. an auth/session relay) — not treated as risky.")
                 else:
                     st.write(f"✅ Redirects only within the same domain (e.g. http→https or www upgrade) — not treated as risky.")
+                shortlink_hops = label_shortlink_hops(redirect_chain)  # NEW (v16.2)
                 for i, hop in enumerate(redirect_chain):
                     if i == 0:
                         tag = "🔗 Start"
@@ -1583,7 +1778,8 @@ with tab_single:
                         tag = f"🔀 Hop {i} (domain change)"
                     else:
                         tag = f"⬆️ Hop {i} (same domain)"
-                    st.write(f"**{tag}:** `{hop}`")
+                    shortlink_note = " 🔗 *(known link-shortener — auto-expanded below)*" if i in shortlink_hops else ""
+                    st.write(f"**{tag}:** `{hop}`{shortlink_note}")
             else:
                 st.write(f"✅ No redirects detected — direct link to `{redirect_chain[0]}`")
 
@@ -1715,6 +1911,23 @@ with tab_single:
                 st.error("🛑 ACTION RECOMMENDED: Multiple live and structural signals indicate this URL is unsafe. Avoid entering credentials or personal data.")
             else:
                 st.success("✔ No live threat-feed matches or high-risk structural patterns were found in this scan.")
+
+            # NEW (v16.2) — simple feedback loop. Does not retrain the ML model automatically
+            # (that needs a human to periodically review this log and re-label training data),
+            # but every disagreement is preserved in feedback_log.csv for later review instead
+            # of being lost.
+            st.write("---")
+            st.write("#### 🗳️ Was this result wrong?")
+            fb_col1, fb_col2 = st.columns([3, 1])
+            with fb_col1:
+                fb_comment = st.text_input("Optional: what did we get wrong?", key="fb_comment_input", label_visibility="collapsed",
+                                            placeholder="Optional: what did we get wrong? (e.g. this is my own safe site)")
+            with fb_col2:
+                if st.button("🚩 Report wrong result", use_container_width=True, key="fb_submit_btn"):
+                    if log_user_feedback(result["input_url"], "DANGEROUS" if is_malicious_class else "SAFE", risk_percent, fb_comment):
+                        st.success("Thanks — logged for review.")
+                    else:
+                        st.warning("Could not save feedback right now (storage issue) — please try again later.")
 
             st.write("---")
             st.write("#### 📥 Export This Report:")
@@ -2014,6 +2227,99 @@ with tab_file:
             )
     else:
         st.info("Upload a file above, then click 'SCAN FILE NOW' to run the analysis.")
+
+with tab_email:
+    st.write("#### 📧 Email (.eml) Phishing Scan")
+    st.write("Upload a `.eml` file (export it from Gmail/Outlook as 'Download message' / 'Save as') to check its sender header and every link inside it.")
+
+    uploaded_eml = st.file_uploader("Upload an .eml file", type=["eml"], key="eml_uploader")
+
+    if uploaded_eml is not None:
+        if st.button("🔍 SCAN EMAIL NOW"):
+            import email as _email_lib
+            from email import policy as _email_policy
+
+            raw_bytes = uploaded_eml.read()
+            msg = _email_lib.message_from_bytes(raw_bytes, policy=_email_policy.default)
+
+            eml_from = msg.get("From", "(missing From header)")
+            eml_subject = msg.get("Subject", "(no subject)")
+            eml_reply_to = msg.get("Reply-To", "")
+            eml_return_path = msg.get("Return-Path", "")
+
+            st.write("---")
+            st.write("#### ✉️ Header Summary:")
+            h_col1, h_col2 = st.columns(2)
+            with h_col1:
+                st.write(f"**From:** `{eml_from}`")
+                st.write(f"**Subject:** `{eml_subject}`")
+            with h_col2:
+                st.write(f"**Reply-To:** `{eml_reply_to or '(not set)'}`")
+                st.write(f"**Return-Path:** `{eml_return_path or '(not set)'}`")
+
+            # A Reply-To that doesn't match the visible From domain is a classic phishing tell
+            # (victim replies go somewhere the attacker controls, not the spoofed sender).
+            from_domain_match = re.search(r"@([\w.-]+)", eml_from or "")
+            reply_domain_match = re.search(r"@([\w.-]+)", eml_reply_to or "")
+            if from_domain_match and reply_domain_match and from_domain_match.group(1).lower() != reply_domain_match.group(1).lower():
+                st.error(f"🔴 **Reply-To domain mismatch** — this email claims to be from `{from_domain_match.group(1)}` but replies are routed to `{reply_domain_match.group(1)}`. Classic phishing tell.")
+            elif eml_reply_to and from_domain_match and reply_domain_match:
+                # FIX (review): only claim a "match" when both domains were actually parsed --
+                # previously this fired even when the From header failed to parse, showing a
+                # false-positive "safe" signal.
+                st.success("✅ Reply-To domain matches the From address.")
+            elif eml_reply_to:
+                st.caption("⚪ Reply-To is set but the From/Reply-To address could not be reliably parsed to compare domains.")
+
+            # Extract the body (plain + html) and pull out every http(s) link inside it.
+            body_text = ""
+            if msg.is_multipart():
+                for part in msg.walk():
+                    ctype = part.get_content_type()
+                    if ctype in ("text/plain", "text/html"):
+                        try:
+                            body_text += part.get_content()
+                        except Exception:
+                            pass
+            else:
+                try:
+                    body_text = msg.get_content()
+                except Exception:
+                    body_text = ""
+
+            found_links_all = sorted(set(re.findall(r"https?://[^\s'\"<>\)]+", body_text)))
+            EML_MAX_LINKS_TO_SCAN = 15  # FIX (review): cap per-email scan cost so a crafted/huge .eml can't burn unlimited VT/GSB quota or block the app
+            found_links = found_links_all[:EML_MAX_LINKS_TO_SCAN]
+            truncated_link_count = len(found_links_all) - len(found_links)
+
+            st.write("---")
+            st.write(f"#### 🔗 Links Found In Email Body: {len(found_links_all)}")
+            if truncated_link_count > 0:
+                st.caption(f"⚪ Only scanning the first {EML_MAX_LINKS_TO_SCAN} link(s) to keep this quick — {truncated_link_count} link(s) skipped. Scan those separately in the Single Scan tab if needed.")
+            if not found_links:
+                st.info("No http(s) links were found inside this email.")
+            else:
+                with st.spinner(f"Scanning {len(found_links)} link(s) found in the email..."):
+                    eml_results = []
+                    for link in found_links:
+                        res, _cached = run_scan_cached(link, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key, vt_key=vt_api_key)
+                        eml_results.append((link, res))
+
+                dangerous_links = [l for l, r in eml_results if r["is_malicious_class"]]
+                if dangerous_links:
+                    st.error(f"🚨 {len(dangerous_links)} of {len(found_links)} scanned link(s) in this email are flagged DANGEROUS.")
+                else:
+                    st.success(f"✅ All {len(found_links)} scanned link(s) in this email came back SAFE.")
+
+                for link, res in eml_results:
+                    verdict = "⚠️ DANGEROUS" if res["is_malicious_class"] else "✅ SAFE"
+                    st.write(f"**{verdict}** ({res['risk_percent']}% risk) — `{link}`")
+
+            if from_domain_match or found_links:
+                st.write("---")
+                st.caption("ℹ️ Email header analysis + link scanning is heuristic, like the rest of this tool — always treat unexpected emails asking for credentials or payments with caution regardless of the score shown here.")
+    else:
+        st.info("Upload a .eml file above, then click 'SCAN EMAIL NOW' to run the analysis.")
 
 # 10. Credit Footer
 st.write("---")
