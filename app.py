@@ -1943,7 +1943,11 @@ vt_api_key = get_vt_api_key()
 tab_single, tab_bulk, tab_file, tab_email = st.tabs(["🔍 Single Scan", "📂 Bulk Scan", "🗂️ File Scan", "📧 Email Scan"])
 
 with tab_single:
-    user_target = st.text_input("🔗 Enter website link here to analyze secure features:", placeholder="e.g., https://my-safe-website.com")
+    user_target = st.text_input(
+    "🔗 Enter website link here to analyze secure features:",
+    placeholder="e.g., https://my-safe-website.com",
+    key="url_input_single",
+)
 
     _force_refresh_clicked = st.session_state.pop("_force_vt_recheck", False)
 
