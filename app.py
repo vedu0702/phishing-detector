@@ -182,23 +182,40 @@ def render_screenshot_preview(target_url):
           (function() {{
             var img = document.getElementById('thumb-img');
             var loading = document.getElementById('thumb-loading');
+            // FIX: components.html() always reserves a fixed-height <iframe> in the page
+            // (we originally hardcoded height=520), so once the spinner was replaced by a
+            // much shorter "unavailable" message, or by an image shorter than 520px, a big
+            // dead blank gap was left behind below it. components.v1.html iframes are
+            // same-origin, so we can reach out to our own <iframe> element via
+            // window.frameElement and resize it to match the *actual* rendered content
+            // every time the content changes (loading -> loaded/error), instead of a
+            // static guess.
+            function resizeToContent() {{
+              if (window.frameElement) {{
+                window.frameElement.style.height = document.body.scrollHeight + 'px';
+              }}
+            }}
+            resizeToContent();
             // Fallback in case thum.io hangs indefinitely: stop showing "loading" after 25s.
             var timeoutId = setTimeout(function() {{
               loading.innerHTML = '⚪ Live screenshot preview is taking unusually long -- the destination site may be blocking automated screenshots.';
+              resizeToContent();
             }}, 25000);
             img.onload = function() {{
               clearTimeout(timeoutId);
               img.style.display = 'block';
               loading.style.display = 'none';
+              resizeToContent();
             }};
             img.onerror = function() {{
               clearTimeout(timeoutId);
               loading.innerHTML = '⚪ Live screenshot preview unavailable for this site right now.';
+              resizeToContent();
             }};
           }})();
         </script>
         """,
-        height=520,
+        height=90,
     )
     st.caption("Live screenshot of the destination page -- verify it visually matches what you expect before trusting it.")
 
