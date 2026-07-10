@@ -370,8 +370,8 @@ st.markdown("""
         animation: sg-pulse 1.4s ease-in-out infinite;
     }
     @keyframes sg-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
-    .sg-subtitle { color: #9aa4c7; font-size: 14.5px; max-width: 620px; width: 100%; margin: 10px auto 0; text-align: center; }
-    .sg-disclaimer { color: #6b7394; font-size: 11.5px; font-style: italic; margin-top: 6px; text-align: center; width: 100%; }
+    .sg-subtitle { color: #9aa4c7; font-size: 17.5px; max-width: 620px; width: 100%; margin: 10px auto 0; text-align: center; }
+    .sg-disclaimer { color: #6b7394; font-size: 14.5px; font-style: italic; margin-top: 6px; text-align: center; width: 100%; }
 
     /* Glass panel look for containers Streamlit renders (columns, expanders) */
     div[data-testid="stVerticalBlockBorderWrapper"], .stTabs {
