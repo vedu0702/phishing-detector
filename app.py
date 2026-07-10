@@ -167,8 +167,8 @@ def render_screenshot_preview(target_url):
     # desktop aspect ratio -- without this, thum.io used its own default capture window
     # (narrower/more square), which then got stretched to our target width and looked
     # squeezed/distorted compared to how the site actually renders in a real browser.
-    thumb_url = f"https://image.thum.io/get/width/1500/crop/1000/viewport/1500x350/noanimate/{target_url}"
-    thumb_url_full = f"https://image.thum.io/get/width/1500/crop/1000/viewport/1500x350/noanimate/{target_url}"
+    thumb_url = f"https://image.thum.io/get/width/1500/crop/900/viewport/1500x350/noanimate/{target_url}"
+    thumb_url_full = f"https://image.thum.io/get/width/1500/crop/900/viewport/1500x350/noanimate/{target_url}"
     safe_thumb_url = html.escape(thumb_url, quote=True)
     safe_thumb_url_full = html.escape(thumb_url_full, quote=True)
     components.html(
