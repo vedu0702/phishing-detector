@@ -110,7 +110,18 @@ def run_scan_cached(user_target, gsb_key=None, urlhaus_key=None, vt_key=None, fo
         cached = get_cached_scan(cache_key)
         if cached is not None:
             return cached, True
-    result = scan_url(user_target, gsb_key=gsb_key, urlhaus_key=urlhaus_key, vt_key=vt_key)
+    # FIX: if a previous attempt on this exact URL left VirusTotal "still pending", reuse its
+    # analysis_id instead of resubmitting from scratch -- lets a "Recheck" click actually poll
+    # further into an analysis that's already been running since the first scan.
+    pending_ids = st.session_state.setdefault("_vt_pending_analysis_ids", {})
+    pending_id = pending_ids.get(cache_key)
+    result = scan_url(user_target, gsb_key=gsb_key, urlhaus_key=urlhaus_key, vt_key=vt_key,
+                       vt_pending_analysis_id=pending_id)
+    new_analysis_id = result.get("vt_result", {}).get("analysis_id")
+    if new_analysis_id and not result.get("vt_result", {}).get("checked"):
+        pending_ids[cache_key] = new_analysis_id
+    else:
+        pending_ids.pop(cache_key, None)
     set_cached_scan(cache_key, result)
     return result, False
 
@@ -131,14 +142,42 @@ def compute_feed_consensus(result):
 def render_screenshot_preview(target_url):
     """Shows a live visual thumbnail of the destination site so the user can eyeball it
     before clicking through -- uses the free, keyless thum.io screenshot service. Best
-    effort only: some sites block screenshot bots, in which case we just skip silently."""
+    effort only: some sites block screenshot bots, in which case we just skip silently.
+
+    FIX: thum.io renders the target page live and can take several seconds, but the image
+    URL is fetched by the *browser* (not by our Python code), so Streamlit had already
+    finished drawing the page with nothing there -- users saw a blank gap and assumed the
+    tool was broken/buggy. This renders a small animated "Loading preview..." placeholder
+    that the browser swaps out for the real screenshot as soon as it finishes loading (or
+    for an error note if thum.io fails/blocks the request), using plain HTML/CSS + a couple
+    of inline event handlers -- no extra JS framework needed.
+    """
     st.write("#### U0001F5BC️ Live Site Preview (visual check before you click):")
     thumb_url = f"https://image.thum.io/get/width/700/crop/500/noanimate/{target_url}"
-    try:
-        st.image(thumb_url, use_container_width=True,
-                 caption="Live screenshot of the destination page -- verify it visually matches what you expect before trusting it.")
-    except Exception:
-        st.caption("⚪ Live screenshot preview unavailable for this site right now.")
+    st.markdown(
+        f"""
+        <div style="position: relative; width: 100%; min-height: 120px;">
+          <div id="thumb-loading" style="
+              display: flex; align-items: center; gap: 10px;
+              padding: 18px; border-radius: 8px; background: #10141f;
+              color: #94a3b8; font-family: inherit; font-size: 14px;">
+            <div style="
+                width: 16px; height: 16px; border-radius: 50%;
+                border: 2.5px solid #334155; border-top-color: #00e0b8;
+                animation: thumb-spin 0.8s linear infinite;"></div>
+            <span>Loading live preview… (destination page is being rendered, this can take a few seconds)</span>
+          </div>
+          <img src="{thumb_url}" style="width: 100%; border-radius: 8px; display: none; margin-top: 6px;"
+               onload="this.style.display='block'; this.previousElementSibling.style.display='none';"
+               onerror="this.previousElementSibling.innerHTML='⚪ Live screenshot preview unavailable for this site right now.'; this.previousElementSibling.querySelector('div').style.display='none';" />
+        </div>
+        <style>
+          @keyframes thumb-spin {{ to {{ transform: rotate(360deg); }} }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("Live screenshot of the destination page -- verify it visually matches what you expect before trusting it.")
 
 def label_shortlink_hops(redirect_chain):
     """Returns a set of indices in redirect_chain that are known URL-shortener hops,
@@ -313,7 +352,16 @@ def check_past_phishing_history(target_url, auth_key=None):
             timeout=6.0
         )
         if response.status_code == 200:
-            res_data = response.json()
+            # FIX: URLhaus returns HTTP 200 with a *plain-text* "ERROR: ..." body (not JSON)
+            # when the Auth-Key itself is invalid/malformed -- .json() then throws, and that
+            # exception used to fall into the generic "network/timeout error" catch-all below,
+            # which hid the real problem (a bad key) behind a misleading message for every
+            # single site scanned.
+            try:
+                res_data = response.json()
+            except ValueError:
+                return {"checked": False, "matched": False,
+                        "status": f"⚪ URLhaus Auth-Key rejected (bad response: {response.text.strip()[:60] or 'empty'}) — check your key at auth.abuse.ch"}
             if res_data.get('query_status') == 'ok':
                 return {"checked": True, "matched": True,
                         "status": f"🔴 Reported in Global Blocklist databases (Class: {res_data.get('threat')})"}
@@ -323,8 +371,10 @@ def check_past_phishing_history(target_url, auth_key=None):
             return {"checked": False, "matched": False,
                     "status": "⚪ URLhaus Auth-Key invalid or expired (HTTP 401) — check your key at auth.abuse.ch"}
         return {"checked": False, "matched": False, "status": f"⚪ URLhaus check failed (HTTP {response.status_code})"}
-    except Exception:
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
         return {"checked": False, "matched": False, "status": "⚪ URLhaus check failed (network/timeout error)"}
+    except Exception as e:
+        return {"checked": False, "matched": False, "status": f"⚪ URLhaus check failed (unexpected error: {type(e).__name__})"}
 
 # 3b. Google Safe Browsing Check
 def check_google_safe_browsing(target_url, api_key):
@@ -393,44 +443,30 @@ import base64
 def _vt_headers(api_key):
     return {"x-apikey": api_key, "User-Agent": "ThreatX-GlobalGuard/16.0"}
 
-def check_virustotal_url(target_url, api_key):
+def check_virustotal_url(target_url, api_key, pending_analysis_id=None):
+    """
+    pending_analysis_id: if a PREVIOUS call already submitted this exact URL and came back
+    "still pending", pass its analysis_id back in here (the UI persists it in session_state).
+    FIX: without this, every "Recheck VirusTotal" click hit the 404 branch again (VT hadn't
+    indexed the URL yet) and re-POSTed a brand-new submission -- restarting VT's own analysis
+    clock from zero every time, so a fresh URL could *never* finish within our poll window no
+    matter how many times the user clicked recheck. Reusing the same analysis_id lets each
+    recheck poll further into an analysis that's already been running since the first attempt.
+    """
     if not api_key:
         return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
-                "harmless": 0, "undetected": 0, "total_engines": 0,
+                "harmless": 0, "undetected": 0, "total_engines": 0, "analysis_id": None,
                 "status": "⚪ Skipped — no VirusTotal API key configured"}
     try:
-        url_id = base64.urlsafe_b64encode(target_url.encode()).decode().strip("=")
-        resp = requests.get(f"https://www.virustotal.com/api/v3/urls/{url_id}",
-                             headers=_vt_headers(api_key), timeout=10)
+        import time as _time
 
-        if resp.status_code == 429:
-            return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
-                    "harmless": 0, "undetected": 0, "total_engines": 0,
-                    "status": "⚪ VirusTotal rate limit hit (free tier: 4 req/min, 500/day) — try again shortly"}
-        if resp.status_code == 404:
-            # VT has never analyzed this exact URL — submit it fresh and poll briefly.
-            submit_resp = requests.post("https://www.virustotal.com/api/v3/urls",
-                                         headers=_vt_headers(api_key),
-                                         data={"url": target_url}, timeout=10)
-            if submit_resp.status_code not in (200, 201):
-                return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
-                        "harmless": 0, "undetected": 0, "total_engines": 0,
-                        "status": f"⚪ VirusTotal submission failed (HTTP {submit_resp.status_code})"}
-            analysis_id = submit_resp.json().get("data", {}).get("id")
-            if not analysis_id:
-                return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
-                        "harmless": 0, "undetected": 0, "total_engines": 0,
-                        "status": "⚪ VirusTotal submission returned no analysis id"}
+        analysis_id = pending_analysis_id
+        stats = None
 
-            import time as _time
-            stats = None
-            # FIX (v16.2): 30s caught more first-time results but users found the wait
-            # irritating for a quick security check. Trimmed to ~12s and paired with a
-            # one-click "Recheck VirusTotal" button in the UI (tab_single) so users are
-            # never stuck staring at a spinner -- they can retry in one tap once VT's
-            # background scan finishes.
-            for _ in range(6):  # poll up to ~12s -- keeps the spinner short and non-annoying
-                _time.sleep(2.0)
+        if analysis_id:
+            # We already have an in-flight analysis from a previous attempt -- poll it
+            # directly instead of resubmitting, so elapsed wait time actually accumulates.
+            for _ in range(6):
                 poll = requests.get(f"https://www.virustotal.com/api/v3/analyses/{analysis_id}",
                                     headers=_vt_headers(api_key), timeout=10)
                 if poll.status_code == 200:
@@ -438,16 +474,59 @@ def check_virustotal_url(target_url, api_key):
                     if poll_data.get("status") == "completed":
                         stats = poll_data.get("stats", {})
                         break
+                _time.sleep(2.0)
             if stats is None:
                 return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
-                        "harmless": 0, "undetected": 0, "total_engines": 0,
+                        "harmless": 0, "undetected": 0, "total_engines": 0, "analysis_id": analysis_id,
                         "status": "⚪ VirusTotal analysis still pending — new URL, try scanning again shortly"}
-        elif resp.status_code == 200:
-            stats = resp.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
         else:
-            return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
-                    "harmless": 0, "undetected": 0, "total_engines": 0,
-                    "status": f"⚪ VirusTotal lookup failed (HTTP {resp.status_code})"}
+            url_id = base64.urlsafe_b64encode(target_url.encode()).decode().strip("=")
+            resp = requests.get(f"https://www.virustotal.com/api/v3/urls/{url_id}",
+                                 headers=_vt_headers(api_key), timeout=10)
+
+            if resp.status_code == 429:
+                return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                        "harmless": 0, "undetected": 0, "total_engines": 0, "analysis_id": None,
+                        "status": "⚪ VirusTotal rate limit hit (free tier: 4 req/min, 500/day) — try again shortly"}
+            if resp.status_code == 404:
+                # VT has never analyzed this exact URL — submit it fresh and poll briefly.
+                submit_resp = requests.post("https://www.virustotal.com/api/v3/urls",
+                                             headers=_vt_headers(api_key),
+                                             data={"url": target_url}, timeout=10)
+                if submit_resp.status_code not in (200, 201):
+                    return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                            "harmless": 0, "undetected": 0, "total_engines": 0, "analysis_id": None,
+                            "status": f"⚪ VirusTotal submission failed (HTTP {submit_resp.status_code})"}
+                analysis_id = submit_resp.json().get("data", {}).get("id")
+                if not analysis_id:
+                    return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                            "harmless": 0, "undetected": 0, "total_engines": 0, "analysis_id": None,
+                            "status": "⚪ VirusTotal submission returned no analysis id"}
+
+                # FIX (v16.2): 30s caught more first-time results but users found the wait
+                # irritating for a quick security check. Trimmed to ~12s and paired with a
+                # one-click "Recheck VirusTotal" button in the UI (tab_single) so users are
+                # never stuck staring at a spinner -- they can retry in one tap once VT's
+                # background scan finishes.
+                for _ in range(6):  # poll up to ~12s -- keeps the spinner short and non-annoying
+                    _time.sleep(2.0)
+                    poll = requests.get(f"https://www.virustotal.com/api/v3/analyses/{analysis_id}",
+                                        headers=_vt_headers(api_key), timeout=10)
+                    if poll.status_code == 200:
+                        poll_data = poll.json().get("data", {}).get("attributes", {})
+                        if poll_data.get("status") == "completed":
+                            stats = poll_data.get("stats", {})
+                            break
+                if stats is None:
+                    return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                            "harmless": 0, "undetected": 0, "total_engines": 0, "analysis_id": analysis_id,
+                            "status": "⚪ VirusTotal analysis still pending — new URL, try scanning again shortly"}
+            elif resp.status_code == 200:
+                stats = resp.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+            else:
+                return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
+                        "harmless": 0, "undetected": 0, "total_engines": 0, "analysis_id": None,
+                        "status": f"⚪ VirusTotal lookup failed (HTTP {resp.status_code})"}
 
         malicious = stats.get("malicious", 0)
         suspicious = stats.get("suspicious", 0)
@@ -457,14 +536,14 @@ def check_virustotal_url(target_url, api_key):
 
         if malicious + suspicious > 0:
             return {"checked": True, "matched": True, "malicious": malicious, "suspicious": suspicious,
-                    "harmless": harmless, "undetected": undetected, "total_engines": total,
+                    "harmless": harmless, "undetected": undetected, "total_engines": total, "analysis_id": analysis_id,
                     "status": f"🔴 VirusTotal: {malicious + suspicious}/{total} security vendors flag this URL as malicious/suspicious"}
         return {"checked": True, "matched": False, "malicious": malicious, "suspicious": suspicious,
-                "harmless": harmless, "undetected": undetected, "total_engines": total,
+                "harmless": harmless, "undetected": undetected, "total_engines": total, "analysis_id": analysis_id,
                 "status": f"🟢 VirusTotal: 0/{total} security vendors flagged this URL"}
     except Exception:
         return {"checked": False, "matched": False, "malicious": 0, "suspicious": 0,
-                "harmless": 0, "undetected": 0, "total_engines": 0,
+                "harmless": 0, "undetected": 0, "total_engines": 0, "analysis_id": pending_analysis_id,
                 "status": "⚪ VirusTotal request failed (network/timeout error)"}
 
 # 3e. NEW — urlscan.io free public search (100% free, no signup/API key needed for search)
@@ -719,12 +798,40 @@ def _extract_client_side_redirect(html_text, base_url):
     if meta_match:
         return urljoin(base_url, meta_match.group(1).strip())
 
-    js_match = re.search(
+    # Only treat "window.location = ..." / "location.replace(...)" as a REAL client-side
+    # redirect if it fires unconditionally on page load. Sites commonly use the exact same
+    # JS pattern inside event handlers (dropdown .change(), button .click(), form .submit(),
+    # addEventListener(...)) or inside "if (...)" conditions, which only navigate when a user
+    # interacts or a condition is met -- not on load. Naively grabbing the first match caused
+    # false "final destination" results (e.g. a careers-page dropdown handler being reported
+    # as the site's real landing page). We detect "is this line nested inside a block" by
+    # counting unmatched '{' since the start of its enclosing <script> tag: a genuine
+    # top-level auto-redirect (real phishing auto-redirect pages use exactly this) has a
+    # balance of 0 (not nested); one gated behind a handler/condition has a positive balance.
+    # Known limitation: a redirect wrapped in an immediately-invoked function expression
+    # (IIFE) will be misdetected as "nested" and skipped even though it runs unconditionally --
+    # rare in practice since real auto-redirect phishing pages almost always assign
+    # window.location directly at the top level rather than inside an IIFE wrapper.
+    js_pattern = re.compile(
         r'(?:window\.location(?:\.href)?\s*=\s*|location\.replace\s*\(\s*)["\']([^"\']+)["\']',
-        html_text, re.IGNORECASE
+        re.IGNORECASE
     )
-    if js_match:
-        return urljoin(base_url, js_match.group(1).strip())
+
+    def _is_top_level(pos):
+        script_start_idx = html_text.rfind('<script', 0, pos)
+        if script_start_idx == -1:
+            script_start_idx = 0
+        else:
+            tag_end = html_text.find('>', script_start_idx)
+            script_start_idx = tag_end + 1 if tag_end != -1 else script_start_idx
+        segment = html_text[script_start_idx:pos]
+        return (segment.count('{') - segment.count('}')) <= 0
+
+    for m in js_pattern.finditer(html_text):
+        if not _is_top_level(m.start()):
+            # Nested inside a function/conditional/event-handler block -- not an automatic redirect.
+            continue
+        return urljoin(base_url, m.group(1).strip())
 
     return None
 
@@ -1003,7 +1110,7 @@ def extract_lexical_vectors(url, domain_drift=False):
     return features, host, pro_heuristics, phishing_signals
 
 # 6. Unified scan pipeline
-def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None):
+def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None, vt_pending_analysis_id=None):
     original_url = user_target if user_target.startswith(('http://', 'https://')) else 'https://' + user_target
 
     redirect_chain, final_url = trace_redirect_chain(original_url)
@@ -1021,7 +1128,9 @@ def scan_url(user_target, gsb_key=None, urlhaus_key=None, vt_key=None):
     urlhaus_result = check_past_phishing_history(final_url, auth_key=urlhaus_key)
     gsb_result = check_google_safe_browsing(final_url, gsb_key)
     openphish_result = check_openphish(original_url, final_url)  # NEW — free live phishing feed
-    vt_result = check_virustotal_url(final_url, vt_key)  # NEW — real 70+ AV/blocklist vendor report
+    # FIX: reuse an in-flight analysis_id (from a previous "still pending" attempt on this same
+    # URL) instead of always resubmitting -- see check_virustotal_url() docstring for why.
+    vt_result = check_virustotal_url(final_url, vt_key, pending_analysis_id=vt_pending_analysis_id)
     urlscan_result = check_urlscan(final_url, host_domain)  # NEW — free community scan history, no key needed
 
     eval_dataframe = pd.DataFrame(
