@@ -2044,7 +2044,8 @@ with tab_single:
                     if st.button("🔄 Recheck VirusTotal now", key="vt_recheck_btn"):
                         st.session_state["_force_vt_recheck"] = True
                         st.rerun()
-
+                    st.caption("New/rarely-scanned URLs sometimes need a few extra seconds for VirusTotal's background scan to finish.")
+                    
             st.write("#### 📡 Other Live Threat Feed Results:")
             urlscan_result = result["urlscan_result"]
             tf_col1, tf_col2, tf_col3, tf_col4 = st.columns(4)
