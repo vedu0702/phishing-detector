@@ -1955,7 +1955,7 @@ with tab_single:
         if user_target:
             with st.spinner("Tracing redirects, checking threat feeds, WHOIS, geolocation, and running AI models... (brand-new URLs take a little longer while VirusTotal finishes its background scan)"):
                 result, was_cached = run_scan_cached(user_target, gsb_key=gsb_api_key, urlhaus_key=urlhaus_auth_key,
-                                                      vt_key=vt_api_key, force_refresh=_force_refresh_clicked)
+                                                      vt_key=vt_api_key, force_refresh=False)
             st.session_state["_last_scanned_target"] = user_target
             if was_cached:
                 st.caption("⚡ Served from a 5-minute cache — same URL scanned recently, no extra API quota spent.")
@@ -2050,8 +2050,8 @@ with tab_single:
                             status_box = st.empty()
                             pending_id = vt_result.get("analysis_id")
                             fresh_vt = vt_result
-                            for attempt in range(6):
-                                status_box.info(f"⏳ Polling VirusTotal... attempt {attempt + 1}/6")
+                            for attempt in range(15):
+                                status_box.info(f"⏳ Polling VirusTotal... attempt {attempt + 1}/15")
                                 _time.sleep(5)
                                 fresh_vt = check_virustotal_url(result["final_url"], vt_api_key, pending_analysis_id=pending_id)
                                 if fresh_vt.get("checked"):
@@ -2069,9 +2069,9 @@ with tab_single:
                                 st.success("✅ VirusTotal finished — showing updated results below.")
                             else:
                                 st.warning("⚪ Still pending after 30s — VirusTotal is taking longer than usual. Click Recheck again in a bit.")
+
+                            st.session_state["_force_vt_recheck"] = True
                             st.rerun()
-                
-                    st.caption("Note: After clicking 'Recheck VirusTotal Now', please refresh the THREAT-X Tool, paste the website URL again, and click 'SCAN WEBSITE NOW' to fetch the updated VirusTotal results. Thank you!")
                     
             st.write("#### 📡 Other Live Threat Feed Results:")
             urlscan_result = result["urlscan_result"]
