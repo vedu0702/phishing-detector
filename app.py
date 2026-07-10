@@ -2038,35 +2038,34 @@ with tab_single:
                 else:
                     st.success(f"✅ **0/{total} security vendors** flagged this URL — clean across all engines VirusTotal aggregates.")
             else:
-    st.write(vt_result.get("status", "⚪ VirusTotal not available"))
-    if "pending" in vt_result.get("status", "").lower():
-        st.caption("New/rarely-scanned URLs need a little time for VirusTotal's background scan to finish.")
-        if st.button("🔄 Recheck VirusTotal now", key="vt_recheck_btn"):
-            import time as _time
-            status_box = st.empty()
-            pending_id = vt_result.get("analysis_id")
-            fresh_vt = vt_result
-            for attempt in range(6):  # polls for up to ~30s in THIS SAME click -- no manual refresh needed
-                status_box.info(f"⏳ Polling VirusTotal... attempt {attempt + 1}/6")
-                _time.sleep(5)
-                fresh_vt = check_virustotal_url(result["final_url"], vt_api_key, pending_analysis_id=pending_id)
-                if fresh_vt.get("checked"):
-                    break
-                pending_id = fresh_vt.get("analysis_id") or pending_id
-            status_box.empty()
+                    st.write(vt_result.get("status", "⚪ VirusTotal not available"))
+                    if "pending" in vt_result.get("status", "").lower():
+                        st.caption("New/rarely-scanned URLs need a little time for VirusTotal's background scan to finish.")
+                        if st.button("🔄 Recheck VirusTotal now", key="vt_recheck_btn"):
+                            import time as _time
+                            status_box = st.empty()
+                            pending_id = vt_result.get("analysis_id")
+                            fresh_vt = vt_result
+                            for attempt in range(6):
+                                status_box.info(f"⏳ Polling VirusTotal... attempt {attempt + 1}/6")
+                                _time.sleep(5)
+                                fresh_vt = check_virustotal_url(result["final_url"], vt_api_key, pending_analysis_id=pending_id)
+                                if fresh_vt.get("checked"):
+                                    break
+                                pending_id = fresh_vt.get("analysis_id") or pending_id
+                            status_box.empty()
 
-            # Persist the fresh result into this URL's cache entry so the rerun below shows it
-            cache_key = user_target.strip().lower()
-            cached_entry = get_cached_scan(cache_key)
-            if cached_entry:
-                cached_entry["vt_result"] = fresh_vt
-                set_cached_scan(cache_key, cached_entry)
+                            cache_key = user_target.strip().lower()
+                            cached_entry = get_cached_scan(cache_key)
+                            if cached_entry:
+                                cached_entry["vt_result"] = fresh_vt
+                                set_cached_scan(cache_key, cached_entry)
 
-            if fresh_vt.get("checked"):
-                st.success("✅ VirusTotal finished — showing updated results below.")
-            else:
-                st.warning("⚪ Still pending after 30s — VirusTotal is taking longer than usual. Click Recheck again in a bit.")
-            st.rerun()
+                            if fresh_vt.get("checked"):
+                                st.success("✅ VirusTotal finished — showing updated results below.")
+                            else:
+                                st.warning("⚪ Still pending after 30s — VirusTotal is taking longer than usual. Click Recheck again in a bit.")
+                            st.rerun()
                 
                     st.caption("Note: After clicking 'Recheck VirusTotal Now', please refresh the THREAT-X Tool, paste the website URL again, and click 'SCAN WEBSITE NOW' to fetch the updated VirusTotal results. Thank you!")
                     
