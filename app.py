@@ -376,6 +376,14 @@ st.markdown("""
         border: 1px solid var(--sg-border);
         border-radius: 14px;
         backdrop-filter: blur(10px);
+        padding: 20px 24px;
+    }
+    .stTabs {
+        background: var(--sg-panel);
+        border: 1px solid var(--sg-border);
+        border-radius: 14px;
+        backdrop-filter: blur(10px);
+        padding: 8px 20px 20px;
     }
 
     .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--sg-border); }
