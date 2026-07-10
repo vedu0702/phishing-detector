@@ -317,18 +317,145 @@ def log_user_feedback(scanned_url, verdict, risk_percent, user_comment):
 
 st.markdown("""
     <style>
-    .main { background-color: #060814; }
-    div.block-container { padding-top: 2rem; }
-    h1 { color: #ffffff; text-align: center; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; }
-    h3 { color: #f1f5f9; font-family: 'Helvetica Neue', Arial, sans-serif; }
-    .stButton>button { background-color: #00ffcc; color: #060814; font-weight: bold; width: 100%; border-radius: 6px; height: 52px; font-size: 18px; border: none; transition: 0.3s; box-shadow: 0px 4px 15px rgba(0, 255, 204, 0.2); }
-    .stButton>button:hover { background-color: #00ccaa; box-shadow: 0px 0px 25px #00ffcc; transform: translateY(-1px); }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+    :root {
+        --sg-cyan: #22e5ff;
+        --sg-purple: #a855f7;
+        --sg-danger: #ff2d6e;
+        --sg-bg: #05060f;
+        --sg-panel: rgba(18, 20, 38, 0.55);
+        --sg-border: rgba(120, 140, 255, 0.18);
+    }
+
+    html, body, .main {
+        background: radial-gradient(circle at 20% 0%, rgba(124,58,237,0.10), transparent 45%),
+                    radial-gradient(circle at 85% 15%, rgba(34,229,255,0.08), transparent 40%),
+                    var(--sg-bg) !important;
+        font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    }
+
+    /* Subtle animated scanning grid -- professional HUD feel, not a distraction */
+    .main::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image:
+            linear-gradient(rgba(34,229,255,0.035) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(34,229,255,0.035) 1px, transparent 1px);
+        background-size: 42px 42px;
+        pointer-events: none;
+        z-index: 0;
+        mask-image: linear-gradient(to bottom, rgba(0,0,0,0.9), rgba(0,0,0,0.15));
+    }
+
+    div.block-container { padding-top: 1.4rem; position: relative; z-index: 1; max-width: 1150px; }
+
+    h1, h2, h3, h4 { color: #f1f5ff; font-family: 'Inter', sans-serif; letter-spacing: 0.2px; }
+
+    /* Header */
+    .sg-header { text-align: center; padding: 18px 0 6px 0; }
+    .sg-logo { font-size: 40px; font-weight: 800; letter-spacing: 1px; }
+    .sg-logo .sg-x { color: var(--sg-cyan); text-shadow: 0 0 18px rgba(34,229,255,0.65); }
+    .sg-badge {
+        display: inline-flex; align-items: center; gap: 6px;
+        font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 600;
+        color: #b9c2ff; background: rgba(124,58,237,0.14);
+        border: 1px solid rgba(168,85,247,0.35); border-radius: 20px;
+        padding: 3px 12px; margin-left: 10px; vertical-align: middle;
+    }
+    .sg-badge .dot {
+        width: 6px; height: 6px; border-radius: 50%; background: var(--sg-cyan);
+        box-shadow: 0 0 8px var(--sg-cyan);
+        animation: sg-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes sg-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+    .sg-subtitle { color: #9aa4c7; font-size: 14.5px; max-width: 620px; margin: 10px auto 0; }
+    .sg-disclaimer { color: #6b7394; font-size: 11.5px; font-style: italic; margin-top: 6px; }
+
+    /* Glass panel look for containers Streamlit renders (columns, expanders) */
+    div[data-testid="stVerticalBlockBorderWrapper"], .stTabs {
+        background: var(--sg-panel);
+        border: 1px solid var(--sg-border);
+        border-radius: 14px;
+        backdrop-filter: blur(10px);
+    }
+
+    /* Tabs -> HUD nav */
+    .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--sg-border); }
+    .stTabs [data-baseweb="tab"] {
+        color: #8a93b8; font-family: 'JetBrains Mono', monospace; font-size: 13.5px;
+        font-weight: 600; padding: 10px 18px;
+    }
+    .stTabs [aria-selected="true"] {
+        color: var(--sg-cyan) !important;
+        border-bottom: 2px solid var(--sg-cyan) !important;
+        text-shadow: 0 0 10px rgba(34,229,255,0.5);
+    }
+
+    /* Text input -> terminal style */
+    .stTextInput input, .stTextArea textarea {
+        background: rgba(8,10,22,0.85) !important;
+        border: 1px solid var(--sg-border) !important;
+        color: #e3e8ff !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        border-radius: 8px !important;
+    }
+    .stTextInput input:focus, .stTextArea textarea:focus {
+        border-color: var(--sg-cyan) !important;
+        box-shadow: 0 0 0 1px var(--sg-cyan), 0 0 18px rgba(34,229,255,0.25) !important;
+    }
+
+    /* Primary action button -> neon gradient */
+    .stButton>button {
+        background: linear-gradient(100deg, var(--sg-cyan) 0%, var(--sg-purple) 100%);
+        color: #060814; font-weight: 700; width: 100%; border-radius: 8px;
+        height: 52px; font-size: 16px; letter-spacing: 0.4px; border: none;
+        transition: 0.25s; box-shadow: 0 4px 20px rgba(34,229,255,0.25);
+        font-family: 'Inter', sans-serif;
+    }
+    .stButton>button:hover {
+        box-shadow: 0 0 30px rgba(34,229,255,0.55), 0 0 30px rgba(168,85,247,0.35);
+        transform: translateY(-1px);
+    }
+
+    /* Metrics */
+    div[data-testid="stMetric"] {
+        background: rgba(10,12,26,0.6); border: 1px solid var(--sg-border);
+        border-radius: 10px; padding: 10px 14px;
+    }
+    div[data-testid="stMetricValue"] { font-family: 'JetBrains Mono', monospace; }
+
+    /* Alerts restyled as SOC-style status lines */
+    div[data-testid="stAlert"] {
+        background: rgba(10,12,26,0.7) !important;
+        border-radius: 10px !important;
+        border: 1px solid var(--sg-border) !important;
+        backdrop-filter: blur(6px);
+    }
+    div[data-testid="stAlert"] p { font-family: 'Inter', sans-serif; }
+
+    /* Scrollbar to match theme */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: rgba(34,229,255,0.35); border-radius: 4px; }
+
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     .stAppDeployButton {display:none;}
     </style>
     """, unsafe_allow_html=True)
+
+st.markdown("""
+    <div class="sg-header">
+        <div class="sg-logo">
+            <span style="color:#f1f5ff;">THREAT</span><span class="sg-x">-X</span>
+            <span class="sg-badge"><span class="dot"></span>LIVE SCANNER · v16.0</span>
+        </div>
+        <p class="sg-subtitle">Real-time scanning across live threat-intelligence feeds, WHOIS, SSL, and redirect-chain analysis.</p>
+        <p class="sg-disclaimer">⚠️ Heuristic + AI-assisted risk assessment — not a definitive legal or forensic verdict. Always use independent judgement before entering credentials on any site.</p>
+    </div>
+""", unsafe_allow_html=True)
 
 st.write("<div style='text-align: center; padding-top: 10px;'><span style='font-size: 38px; font-weight: 800; color: #ffffff; letter-spacing: 1px;'>THREAT</span><span style='font-size: 38px; font-weight: 800; color: #00ffcc; letter-spacing: 1px;'>-X</span><span style='font-size: 14px; font-weight: bold; color: #475569; margin-left: 8px;'>GLOBAL GUARD PRO v16.0</span></div>", unsafe_allow_html=True)
 st.write("<p style='text-align: center; color: #94a3b8; font-size: 15px; font-family: Arial;'>Enter any website address below to run a live scan across real threat-intelligence feeds, WHOIS, SSL, and redirect analysis.</p>", unsafe_allow_html=True)
@@ -2528,20 +2655,21 @@ st.write("---")
 st.markdown("""
 <style>
 .guide-link {
-    color: #3b82f6;
+    color: #22e5ff;
     font-weight: 600;
     text-decoration: underline;
+    text-shadow: 0 0 8px rgba(34,229,255,0.4);
     transition: 0.2s;
 }
-
 .guide-link:hover {
-    color: #2563eb;
+    color: #a855f7;
+    text-shadow: 0 0 14px rgba(168,85,247,0.6);
     cursor: pointer;
 }
 </style>
 
-<div style='text-align:center; color:#475569; font-size:20px; padding:14px 0 6px 0;'>
-    Built under the guidance of
+<div style='text-align:center; color:#7c85ab; font-size:14px; font-family: JetBrains Mono, monospace; padding:14px 0 6px 0;'>
+    BUILT UNDER THE GUIDANCE OF
     <a href="https://www.linkedin.com/in/shanthan-5386a5112/"
        target="_blank"
        class="guide-link"
