@@ -1,3 +1,4 @@
+import html
 import streamlit as st
 import pandas as pd
 import math
@@ -144,38 +145,60 @@ def render_screenshot_preview(target_url):
     before clicking through -- uses the free, keyless thum.io screenshot service. Best
     effort only: some sites block screenshot bots, in which case we just skip silently.
 
-    FIX: thum.io renders the target page live and can take several seconds, but the image
-    URL is fetched by the *browser* (not by our Python code), so Streamlit had already
-    finished drawing the page with nothing there -- users saw a blank gap and assumed the
-    tool was broken/buggy. This renders a small animated "Loading preview..." placeholder
-    that the browser swaps out for the real screenshot as soon as it finishes loading (or
-    for an error note if thum.io fails/blocks the request), using plain HTML/CSS + a couple
-    of inline event handlers -- no extra JS framework needed.
+    FIX v2: the first attempt used st.markdown(unsafe_allow_html=True) with inline
+    onload/onerror JS handlers, but Streamlit's frontend runs all markdown HTML through
+    DOMPurify, which silently strips inline event-handler attributes (onload/onerror) for
+    security -- so the spinner never got swapped out and just hung forever, and the
+    "\U0001F5BC" emoji escape wasn't interpreted inside a plain triple-quoted string either
+    (it needs an actual unicode literal, not the text "U0001F5BC"). Fixed both: the emoji is
+    now a real character, and the whole preview (spinner + image + swap script) is rendered
+    via components.v1.html(), which mounts in its own sandboxed iframe where inline <script>
+    tags and event handlers execute normally.
     """
-    st.write("#### U0001F5BC️ Live Site Preview (visual check before you click):")
+    st.write("#### \U0001F5BC\uFE0F Live Site Preview (visual check before you click):")
     thumb_url = f"https://image.thum.io/get/width/700/crop/500/noanimate/{target_url}"
-    st.markdown(
+    # Escape before embedding in HTML -- a URL containing quotes/angle-brackets could
+    # otherwise break out of the src="..." attribute and corrupt the component markup.
+    safe_thumb_url = html.escape(thumb_url, quote=True)
+    components.html(
         f"""
-        <div style="position: relative; width: 100%; min-height: 120px;">
+        <div style="position: relative; width: 100%; min-height: 120px; font-family: -apple-system, system-ui, sans-serif;">
           <div id="thumb-loading" style="
               display: flex; align-items: center; gap: 10px;
               padding: 18px; border-radius: 8px; background: #10141f;
-              color: #94a3b8; font-family: inherit; font-size: 14px;">
+              color: #94a3b8; font-size: 14px;">
             <div style="
                 width: 16px; height: 16px; border-radius: 50%;
                 border: 2.5px solid #334155; border-top-color: #00e0b8;
-                animation: thumb-spin 0.8s linear infinite;"></div>
+                animation: thumb-spin 0.8s linear infinite; flex-shrink: 0;"></div>
             <span>Loading live preview… (destination page is being rendered, this can take a few seconds)</span>
           </div>
-          <img src="{thumb_url}" style="width: 100%; border-radius: 8px; display: none; margin-top: 6px;"
-               onload="this.style.display='block'; this.previousElementSibling.style.display='none';"
-               onerror="this.previousElementSibling.innerHTML='⚪ Live screenshot preview unavailable for this site right now.'; this.previousElementSibling.querySelector('div').style.display='none';" />
+          <img id="thumb-img" src="{safe_thumb_url}" style="width: 100%; border-radius: 8px; display: none; margin-top: 6px;" />
         </div>
         <style>
           @keyframes thumb-spin {{ to {{ transform: rotate(360deg); }} }}
         </style>
+        <script>
+          (function() {{
+            var img = document.getElementById('thumb-img');
+            var loading = document.getElementById('thumb-loading');
+            // Fallback in case thum.io hangs indefinitely: stop showing "loading" after 25s.
+            var timeoutId = setTimeout(function() {{
+              loading.innerHTML = '⚪ Live screenshot preview is taking unusually long -- the destination site may be blocking automated screenshots.';
+            }}, 25000);
+            img.onload = function() {{
+              clearTimeout(timeoutId);
+              img.style.display = 'block';
+              loading.style.display = 'none';
+            }};
+            img.onerror = function() {{
+              clearTimeout(timeoutId);
+              loading.innerHTML = '⚪ Live screenshot preview unavailable for this site right now.';
+            }};
+          }})();
+        </script>
         """,
-        unsafe_allow_html=True,
+        height=520,
     )
     st.caption("Live screenshot of the destination page -- verify it visually matches what you expect before trusting it.")
 
