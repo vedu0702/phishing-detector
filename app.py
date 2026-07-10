@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 
 # 1. Premium Enterprise UI Configuration
-st.set_page_config(page_title="Threat-X Global Guard Pro", page_icon="🛡️", layout="center")
+st.set_page_config(page_title="Threat-X Global Guard Pro", page_icon="🛡️", layout="centre")
 
 import streamlit.components.v1 as components
 
