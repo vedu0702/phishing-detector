@@ -447,13 +447,15 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.markdown("""
-    <div class="sg-header">
-        <div class="sg-logo">
-            <span style="color:#f1f5ff;">THREAT</span><span class="sg-x">-X</span>
-            <span class="sg-badge"><span class="dot"></span>LIVE SCANNER · v16.0</span>
+    <div style="text-align:center; width:100%; padding:18px 0 6px 0;">
+        <div style="font-size:40px; font-weight:800; letter-spacing:1px; text-align:center;">
+            <span style="color:#f1f5ff;">THREAT</span><span style="color:#22e5ff; text-shadow:0 0 18px rgba(34,229,255,0.65);">-X</span>
+            <span style="display:inline-flex; align-items:center; gap:6px; font-family:'JetBrains Mono',monospace; font-size:11.5px; font-weight:600; color:#b9c2ff; background:rgba(124,58,237,0.14); border:1px solid rgba(168,85,247,0.35); border-radius:20px; padding:3px 12px; margin-left:10px; vertical-align:middle;">
+                <span style="width:6px; height:6px; border-radius:50%; background:#22e5ff; box-shadow:0 0 8px #22e5ff;"></span>LIVE SCANNER · v16.0
+            </span>
         </div>
-        <p class="sg-subtitle">Real-time scanning across live threat-intelligence feeds, WHOIS, SSL, and redirect-chain analysis.</p>
-        <p class="sg-disclaimer">⚠️ Heuristic + AI-assisted risk assessment — not a definitive legal or forensic verdict. Always use independent judgement before entering credentials on any site.</p>
+        <p style="text-align:center; width:100%; color:#9aa4c7; font-size:14.5px; margin:10px auto 0; padding:0;">Real-time scanning across live threat-intelligence feeds, WHOIS, SSL, and redirect-chain analysis.</p>
+        <p style="text-align:center; width:100%; color:#6b7394; font-size:11.5px; font-style:italic; margin-top:6px; padding:0;">⚠️ Heuristic + AI-assisted risk assessment — not a definitive legal or forensic verdict. Always use independent judgement before entering credentials on any site.</p>
     </div>
 """, unsafe_allow_html=True)
 
