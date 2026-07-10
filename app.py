@@ -454,8 +454,8 @@ st.markdown("""
                 <span style="width:6px; height:6px; border-radius:50%; background:#22e5ff; box-shadow:0 0 8px #22e5ff;"></span>LIVE SCANNER · v16.0
             </span>
         </div>
-        <p style="text-align:center; width:100%; color:#9aa4c7; font-size:14.5px; margin:10px auto 0; padding:0;">Real-time scanning across live threat-intelligence feeds, WHOIS, SSL, and redirect-chain analysis.</p>
-        <p style="text-align:center; width:100%; color:#6b7394; font-size:11.5px; font-style:italic; margin-top:6px; padding:0;">⚠️ Heuristic + AI-assisted risk assessment — not a definitive legal or forensic verdict. Always use independent judgement before entering credentials on any site.</p>
+        <p style="text-align:center; width:100%; color:#9aa4c7; font-size:17.5px; margin:10px auto 0; padding:0;">Real-time scanning across live threat-intelligence feeds, WHOIS, SSL, and redirect-chain analysis.</p>
+        <p style="text-align:center; width:100%; color:#6b7394; font-size:14.5px; font-style:italic; margin-top:6px; padding:0;">⚠️ Heuristic + AI-assisted risk assessment — not a definitive legal or forensic verdict. Always use independent judgement before entering credentials on any site.</p>
     </div>
 """, unsafe_allow_html=True)
 
