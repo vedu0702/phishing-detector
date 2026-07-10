@@ -154,15 +154,33 @@ def render_screenshot_preview(target_url):
     now a real character, and the whole preview (spinner + image + swap script) is rendered
     via components.v1.html(), which mounts in its own sandboxed iframe where inline <script>
     tags and event handlers execute normally.
+
+    FIX v3 (two more bugs from v2):
+    1) The caption below the component was a *separate* st.caption() call, positioned by
+       Streamlit in the normal page flow right after the iframe. Because the iframe's height
+       was being measured/resized by JS at the same instant the caption was already laid out
+       by Streamlit, the two disagreed for a moment and the caption text visually landed on
+       top of the screenshot instead of cleanly below it. Fix: the caption is now rendered
+       *inside* the same iframe document, right under the image, so it is part of the exact
+       content whose height we measure -- there is no separate Streamlit element to go out of
+       sync with.
+    2) st.image() previously gave a free built-in fullscreen/expand icon on hover; switching
+       to a raw <img> tag for the loading-spinner fix silently dropped that. Fix: added our
+       own "⛶ Full screen" button overlaid on the corner of the screenshot that opens a
+       larger, uncropped version of the same live screenshot in a new browser tab.
     """
     st.write("#### \U0001F5BC\uFE0F Live Site Preview (visual check before you click):")
     thumb_url = f"https://image.thum.io/get/width/700/crop/500/noanimate/{target_url}"
+    # Larger, uncropped version for the "full screen" button -- opened in a new tab since a
+    # sandboxed iframe can't reliably invoke the browser Fullscreen API on its own content.
+    thumb_url_full = f"https://image.thum.io/get/width/1600/noanimate/{target_url}"
     # Escape before embedding in HTML -- a URL containing quotes/angle-brackets could
     # otherwise break out of the src="..." attribute and corrupt the component markup.
     safe_thumb_url = html.escape(thumb_url, quote=True)
+    safe_thumb_url_full = html.escape(thumb_url_full, quote=True)
     components.html(
         f"""
-        <div style="position: relative; width: 100%; min-height: 120px; font-family: -apple-system, system-ui, sans-serif;">
+        <div style="width: 100%; font-family: -apple-system, system-ui, sans-serif;">
           <div id="thumb-loading" style="
               display: flex; align-items: center; gap: 10px;
               padding: 18px; border-radius: 8px; background: #10141f;
@@ -173,15 +191,29 @@ def render_screenshot_preview(target_url):
                 animation: thumb-spin 0.8s linear infinite; flex-shrink: 0;"></div>
             <span>Loading live preview… (destination page is being rendered, this can take a few seconds)</span>
           </div>
-          <img id="thumb-img" src="{safe_thumb_url}" style="width: 100%; border-radius: 8px; display: none; margin-top: 6px;" />
+          <div id="thumb-wrap" style="position: relative; display: none; margin-top: 6px;">
+            <img id="thumb-img" src="{safe_thumb_url}" style="width: 100%; display: block; border-radius: 8px;" />
+            <button id="thumb-fullscreen" onclick="window.open('{safe_thumb_url_full}', '_blank')" title="Open full-size screenshot in a new tab" style="
+                position: absolute; bottom: 10px; right: 10px;
+                background: rgba(15,18,28,0.85); color: #e2e8f0; border: 1px solid #334155;
+                border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer;">
+              ⛶ Full screen
+            </button>
+          </div>
+          <div id="thumb-caption" style="display: none; font-size: 13px; color: #94a3b8; margin-top: 8px;">
+            Live screenshot of the destination page -- verify it visually matches what you expect before trusting it.
+          </div>
         </div>
         <style>
           @keyframes thumb-spin {{ to {{ transform: rotate(360deg); }} }}
+          #thumb-fullscreen:hover {{ background: rgba(15,18,28,1); border-color: #00e0b8; }}
         </style>
         <script>
           (function() {{
             var img = document.getElementById('thumb-img');
+            var wrap = document.getElementById('thumb-wrap');
             var loading = document.getElementById('thumb-loading');
+            var caption = document.getElementById('thumb-caption');
             // FIX: components.html() always reserves a fixed-height <iframe> in the page
             // (we originally hardcoded height=520), so once the spinner was replaced by a
             // much shorter "unavailable" message, or by an image shorter than 520px, a big
@@ -189,13 +221,19 @@ def render_screenshot_preview(target_url):
             // same-origin, so we can reach out to our own <iframe> element via
             // window.frameElement and resize it to match the *actual* rendered content
             // every time the content changes (loading -> loaded/error), instead of a
-            // static guess.
+            // static guess. Double requestAnimationFrame ensures we measure *after* the
+            // browser has finished laying out the just-revealed image, not before.
             function resizeToContent() {{
-              if (window.frameElement) {{
-                window.frameElement.style.height = document.body.scrollHeight + 'px';
-              }}
+              requestAnimationFrame(function() {{
+                requestAnimationFrame(function() {{
+                  if (window.frameElement) {{
+                    window.frameElement.style.height = document.body.scrollHeight + 'px';
+                  }}
+                }});
+              }});
             }}
             resizeToContent();
+            window.addEventListener('resize', resizeToContent);
             // Fallback in case thum.io hangs indefinitely: stop showing "loading" after 25s.
             var timeoutId = setTimeout(function() {{
               loading.innerHTML = '⚪ Live screenshot preview is taking unusually long -- the destination site may be blocking automated screenshots.';
@@ -203,7 +241,8 @@ def render_screenshot_preview(target_url):
             }}, 25000);
             img.onload = function() {{
               clearTimeout(timeoutId);
-              img.style.display = 'block';
+              wrap.style.display = 'block';
+              caption.style.display = 'block';
               loading.style.display = 'none';
               resizeToContent();
             }};
@@ -217,7 +256,6 @@ def render_screenshot_preview(target_url):
         """,
         height=90,
     )
-    st.caption("Live screenshot of the destination page -- verify it visually matches what you expect before trusting it.")
 
 def label_shortlink_hops(redirect_chain):
     """Returns a set of indices in redirect_chain that are known URL-shortener hops,
