@@ -335,7 +335,6 @@ st.markdown("""
         font-family: 'Inter', 'Helvetica Neue', sans-serif;
     }
 
-    /* Subtle animated scanning grid -- professional HUD feel, not a distraction */
     .main::before {
         content: "";
         position: fixed;
@@ -349,20 +348,19 @@ st.markdown("""
         mask-image: linear-gradient(to bottom, rgba(0,0,0,0.9), rgba(0,0,0,0.15));
     }
 
-    div.block-container { padding: 25px 50px 75px 100px; padding-left: 2rem; padding-right: 2rem; position: relative; z-index: 1; margin-left: auto; margin-right: auto; }
+    div.block-container { padding-top: 2rem; position: relative; z-index: 1; }
 
     h1, h2, h3, h4 { color: #f1f5ff; font-family: 'Inter', sans-serif; letter-spacing: 0.2px; }
 
-    /* Header */
     .sg-header { text-align: center; padding: 18px 0 6px 0; }
-    .sg-logo { font-size: 40px; font-weight: 800; letter-spacing: 1px; }
+    .sg-logo { font-size: 34px; font-weight: 800; letter-spacing: 1px; }
     .sg-logo .sg-x { color: var(--sg-cyan); text-shadow: 0 0 18px rgba(34,229,255,0.65); }
     .sg-badge {
         display: inline-flex; align-items: center; gap: 6px;
-        font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 600;
+        font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 600;
         color: #b9c2ff; background: rgba(124,58,237,0.14);
         border: 1px solid rgba(168,85,247,0.35); border-radius: 20px;
-        padding: 3px 12px; margin-left: 10px; vertical-align: middle;
+        padding: 3px 10px; margin-left: 8px; vertical-align: middle;
     }
     .sg-badge .dot {
         width: 6px; height: 6px; border-radius: 50%; background: var(--sg-cyan);
@@ -370,10 +368,9 @@ st.markdown("""
         animation: sg-pulse 1.4s ease-in-out infinite;
     }
     @keyframes sg-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
-    .sg-subtitle { color: #9aa4c7; font-size: 17.5px; max-width: 620px; width: 100%; margin: 10px auto 0; text-align: center; }
-    .sg-disclaimer { color: #6b7394; font-size: 14.5px; font-style: italic; margin-top: 6px; text-align: center; width: 100%; }
+    .sg-subtitle { color: #9aa4c7; font-size: 14.5px; margin: 10px 0 0; text-align: center; }
+    .sg-disclaimer { color: #6b7394; font-size: 11.5px; font-style: italic; margin-top: 6px; text-align: center; }
 
-    /* Glass panel look for containers Streamlit renders (columns, expanders) */
     div[data-testid="stVerticalBlockBorderWrapper"], .stTabs {
         background: var(--sg-panel);
         border: 1px solid var(--sg-border);
@@ -381,11 +378,10 @@ st.markdown("""
         backdrop-filter: blur(10px);
     }
 
-    /* Tabs -> HUD nav */
     .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--sg-border); }
     .stTabs [data-baseweb="tab"] {
-        color: #8a93b8; font-family: 'JetBrains Mono', monospace; font-size: 13.5px;
-        font-weight: 600; padding: 10px 18px;
+        color: #8a93b8; font-family: 'JetBrains Mono', monospace; font-size: 13px;
+        font-weight: 600; padding: 10px 14px;
     }
     .stTabs [aria-selected="true"] {
         color: var(--sg-cyan) !important;
@@ -393,7 +389,6 @@ st.markdown("""
         text-shadow: 0 0 10px rgba(34,229,255,0.5);
     }
 
-    /* Text input -> terminal style */
     .stTextInput input, .stTextArea textarea {
         background: rgba(8,10,22,0.85) !important;
         border: 1px solid var(--sg-border) !important;
@@ -406,7 +401,6 @@ st.markdown("""
         box-shadow: 0 0 0 1px var(--sg-cyan), 0 0 18px rgba(34,229,255,0.25) !important;
     }
 
-    /* Primary action button -> neon gradient */
     .stButton>button {
         background: linear-gradient(100deg, var(--sg-cyan) 0%, var(--sg-purple) 100%);
         color: #060814; font-weight: 700; width: 100%; border-radius: 8px;
@@ -419,14 +413,12 @@ st.markdown("""
         transform: translateY(-1px);
     }
 
-    /* Metrics */
     div[data-testid="stMetric"] {
         background: rgba(10,12,26,0.6); border: 1px solid var(--sg-border);
         border-radius: 10px; padding: 10px 14px;
     }
     div[data-testid="stMetricValue"] { font-family: 'JetBrains Mono', monospace; }
 
-    /* Alerts restyled as SOC-style status lines */
     div[data-testid="stAlert"] {
         background: rgba(10,12,26,0.7) !important;
         border-radius: 10px !important;
@@ -435,7 +427,6 @@ st.markdown("""
     }
     div[data-testid="stAlert"] p { font-family: 'Inter', sans-serif; }
 
-    /* Scrollbar to match theme */
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: rgba(34,229,255,0.35); border-radius: 4px; }
 
@@ -444,18 +435,16 @@ st.markdown("""
     header {visibility: hidden;}
     .stAppDeployButton {display:none;}
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 st.markdown("""
-    <div style="text-align:center; width:100%; padding:18px 0 6px 0;">
-        <div style="font-size:40px; font-weight:800; letter-spacing:1px; text-align:center;">
-            <span style="color:#f1f5ff;">THREAT</span><span style="color:#22e5ff; text-shadow:0 0 18px rgba(34,229,255,0.65);">-X</span>
-            <span style="display:inline-flex; align-items:center; gap:6px; font-family:'JetBrains Mono',monospace; font-size:11.5px; font-weight:600; color:#b9c2ff; background:rgba(124,58,237,0.14); border:1px solid rgba(168,85,247,0.35); border-radius:20px; padding:3px 12px; margin-left:10px; vertical-align:middle;">
-                <span style="width:6px; height:6px; border-radius:50%; background:#22e5ff; box-shadow:0 0 8px #22e5ff;"></span>LIVE SCANNER · v16.0
-            </span>
+    <div class="sg-header">
+        <div class="sg-logo">
+            <span style="color:#f1f5ff;">THREAT</span><span class="sg-x">-X</span>
+            <span class="sg-badge"><span class="dot"></span>LIVE SCANNER · v16.0</span>
         </div>
-        <p style="text-align:center; width:100%; color:#9aa4c7; font-size:17.5px; margin:10px auto 0; padding:0;">Real-time scanning across live threat-intelligence feeds, WHOIS, SSL, and redirect-chain analysis.</p>
-        <p style="text-align:center; width:100%; color:#6b7394; font-size:14.5px; font-style:italic; margin-top:6px; padding:0;">⚠️ Heuristic + AI-assisted risk assessment — not a definitive legal or forensic verdict. Always use independent judgement before entering credentials on any site.</p>
+        <p class="sg-subtitle">Real-time scanning across live threat-intelligence feeds, WHOIS, SSL, and redirect-chain analysis.</p>
+        <p class="sg-disclaimer">⚠️ Heuristic + AI-assisted risk assessment — not a definitive legal or forensic verdict. Always use independent judgement before entering credentials on any site.</p>
     </div>
 """, unsafe_allow_html=True)
 
