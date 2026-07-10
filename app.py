@@ -457,9 +457,6 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-st.write("<div style='text-align: center; padding-top: 10px;'><span style='font-size: 38px; font-weight: 800; color: #ffffff; letter-spacing: 1px;'>THREAT</span><span style='font-size: 38px; font-weight: 800; color: #00ffcc; letter-spacing: 1px;'>-X</span><span style='font-size: 14px; font-weight: bold; color: #475569; margin-left: 8px;'>GLOBAL GUARD PRO v16.0</span></div>", unsafe_allow_html=True)
-st.write("<p style='text-align: center; color: #94a3b8; font-size: 15px; font-family: Arial;'>Enter any website address below to run a live scan across real threat-intelligence feeds, WHOIS, SSL, and redirect analysis.</p>", unsafe_allow_html=True)
-st.write("<p style='text-align: center; color: #64748b; font-size: 12px; font-family: Arial; font-style: italic;'>⚠️ This tool produces a heuristic + AI-assisted risk assessment, not a definitive legal or forensic verdict. Always use independent judgement before entering credentials on any site.</p>", unsafe_allow_html=True)
 st.write("---")
 
 # 2. Structural Heuristic + Anomaly-Detection Model (RandomForest + IsolationForest)
