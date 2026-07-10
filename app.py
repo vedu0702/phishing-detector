@@ -163,12 +163,12 @@ def render_screenshot_preview(target_url):
          every scrollHeight measurement, so resized heights were always a bit off.
     """
     st.write("#### \U0001F5BC\uFE0F Live Site Preview (visual check before you click):")
-    thumb_url = f"https://image.thum.io/get/width/700/crop/500/noanimate/{target_url}"
-    # Larger, uncropped version for the "full screen" button -- opened in a new tab since a
-    # sandboxed iframe can't reliably invoke the browser Fullscreen API on its own content.
-    thumb_url_full = f"https://image.thum.io/get/width/1600/noanimate/{target_url}"
-    # Escape before embedding in HTML -- a URL containing quotes/angle-brackets could
-    # otherwise break out of the src="..." attribute and corrupt the component markup.
+     # FIX v5: added explicit viewport/1600x900 so thum.io captures at a standard widescreen
+    # desktop aspect ratio -- without this, thum.io used its own default capture window
+    # (narrower/more square), which then got stretched to our target width and looked
+    # squeezed/distorted compared to how the site actually renders in a real browser.
+    thumb_url = f"https://image.thum.io/get/width/700/crop/500/viewport/1600x900/noanimate/{target_url}"
+    thumb_url_full = f"https://image.thum.io/get/width/1600/viewport/1600x900/noanimate/{target_url}"
     safe_thumb_url = html.escape(thumb_url, quote=True)
     safe_thumb_url_full = html.escape(thumb_url_full, quote=True)
     components.html(
