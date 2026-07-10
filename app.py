@@ -2041,37 +2041,10 @@ with tab_single:
                     st.error(f"🔴 **{flagged}/{total} security vendors** flagged this URL as malicious or suspicious.")
                 else:
                     st.success(f"✅ **0/{total} security vendors** flagged this URL — clean across all engines VirusTotal aggregates.")
-            else:
+                else:
                     st.write(vt_result.get("status", "⚪ VirusTotal not available"))
                     if "pending" in vt_result.get("status", "").lower():
-                        st.caption("New/rarely-scanned URLs need a little time for VirusTotal's background scan to finish.")
-                        if st.button("🔄 Recheck VirusTotal now", key="vt_recheck_btn"):
-                            import time as _time
-                            status_box = st.empty()
-                            pending_id = vt_result.get("analysis_id")
-                            fresh_vt = vt_result
-                            for attempt in range(15):
-                                status_box.info(f"⏳ Polling VirusTotal... attempt {attempt + 1}/15")
-                                _time.sleep(5)
-                                fresh_vt = check_virustotal_url(result["final_url"], vt_api_key, pending_analysis_id=pending_id)
-                                if fresh_vt.get("checked"):
-                                    break
-                                pending_id = fresh_vt.get("analysis_id") or pending_id
-                            status_box.empty()
-
-                            cache_key = user_target.strip().lower()
-                            cached_entry = get_cached_scan(cache_key)
-                            if cached_entry:
-                                cached_entry["vt_result"] = fresh_vt
-                                set_cached_scan(cache_key, cached_entry)
-
-                            if fresh_vt.get("checked"):
-                                st.success("✅ VirusTotal finished — showing updated results below.")
-                            else:
-                                st.warning("⚪ Still pending after 30s — VirusTotal is taking longer than usual. Click Recheck again in a bit.")
-
-                            st.session_state["_force_vt_recheck"] = True
-                            st.rerun()
+                        st.caption("This is a new/rarely-scanned URL — VirusTotal's background scan can take a minute. Refresh the page and re-scan the same link in a bit to see the final result.")
                     
             st.write("#### 📡 Other Live Threat Feed Results:")
             urlscan_result = result["urlscan_result"]
