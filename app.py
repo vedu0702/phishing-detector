@@ -21,8 +21,7 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 # 1. Premium Enterprise UI Configuration
 st.set_page_config(page_title="Threat-X Global Guard Pro", page_icon="🛡️", layout="centered")
 
-# NOTE: st.components.v1 is deprecated in favor of st.iframe (same call shape --
-# accepts a raw HTML string as the first arg, auto-detected and embedded directly).
+import streamlit.components.v1 as components
 
 # NEW (v16.1) -- customer-facing deployments should not expose Streamlit's built-in
 # dev shortcuts ("r" = rerun, "c" = clear cache) or the hamburger menu (Deploy/Settings/
@@ -33,7 +32,7 @@ st.set_page_config(page_title="Threat-X Global Guard Pro", page_icon="🛡️", 
 # and swallows them whenever the user isn't typing inside a text box. No user-facing UI,
 # no server-side effect; purely a client-side guard.
 def _disable_dev_shortcuts():
-    st.iframe(
+    components.html(
         """
         <script>
         (function () {
@@ -54,7 +53,7 @@ def _disable_dev_shortcuts():
         })();
         </script>
         """,
-        height=1,
+        height=0,
     )
 
 _disable_dev_shortcuts()
@@ -149,6 +148,7 @@ def compute_feed_consensus(result):
     return len(clean), len(checked)
 
 def render_screenshot_preview(target_url):
+    from urllib.parse import quote as _urlquote
     """Shows a live visual thumbnail of the destination site so the user can eyeball it
     before clicking through -- uses the free, keyless thum.io screenshot service. Best
     effort only: some sites block screenshot bots, in which case we just skip silently.
@@ -170,7 +170,6 @@ def render_screenshot_preview(target_url):
       5) Zeroing body margin -- the browser's default 8px body margin was quietly adding to
          every scrollHeight measurement, so resized heights were always a bit off.
     """
-    from urllib.parse import quote as _urlquote
     st.write("#### \U0001F5BC\uFE0F Live Site Preview (visual check before you click):")
      # FIX v5: added explicit viewport/1600x900 so thum.io captures at a standard widescreen
     # desktop aspect ratio -- without this, thum.io used its own default capture window
@@ -179,17 +178,12 @@ def render_screenshot_preview(target_url):
     # FIX: URL-encode the target before embedding it in thum.io's path -- previously
     # special characters (spaces, #, ?, &) in the target URL could break the thum.io
     # request. html.escape only protects the HTML attribute context, not the URL itself.
-    # FIX (v2): thum.io expects the scheme/slashes of the target URL to stay literal
-    # (it parses the path by splitting on "/") -- encoding them with safe='' turned
-    # "https://example.com" into "https%3A%2F%2Fexample.com", which thum.io rejects
-    # with a 400 and made every screenshot fail silently. Only encode characters that
-    # would actually break the path (spaces, #, ?, &, etc.), not ":" and "/".
-    encoded_target = _urlquote(target_url, safe='/:')
+    encoded_target = _urlquote(target_url, safe='')
     thumb_url = f"https://image.thum.io/get/width/1500/crop/850/noanimate/{encoded_target}"
     thumb_url_full = f"https://image.thum.io/get/width/1500/crop/900/viewport/1500x900/noanimate/{encoded_target}"
     safe_thumb_url = html.escape(thumb_url, quote=True)
     safe_thumb_url_full = html.escape(thumb_url_full, quote=True)
-    st.iframe(
+    components.html(
         f"""
         <div style="width: 100%; font-family: -apple-system, system-ui, sans-serif;">
           <div id="thumb-loading" style="
