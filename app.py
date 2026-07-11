@@ -54,7 +54,7 @@ def _disable_dev_shortcuts():
         })();
         </script>
         """,
-        height=0,
+        height=1,
     )
 
 _disable_dev_shortcuts()
