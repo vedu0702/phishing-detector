@@ -21,7 +21,8 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 # 1. Premium Enterprise UI Configuration
 st.set_page_config(page_title="Threat-X Global Guard Pro", page_icon="🛡️", layout="centered")
 
-import streamlit.components.v1 as components
+# NOTE: st.components.v1 is deprecated in favor of st.iframe (same call shape --
+# accepts a raw HTML string as the first arg, auto-detected and embedded directly).
 
 # NEW (v16.1) -- customer-facing deployments should not expose Streamlit's built-in
 # dev shortcuts ("r" = rerun, "c" = clear cache) or the hamburger menu (Deploy/Settings/
@@ -32,7 +33,7 @@ import streamlit.components.v1 as components
 # and swallows them whenever the user isn't typing inside a text box. No user-facing UI,
 # no server-side effect; purely a client-side guard.
 def _disable_dev_shortcuts():
-    components.html(
+    st.iframe(
         """
         <script>
         (function () {
@@ -183,7 +184,7 @@ def render_screenshot_preview(target_url):
     thumb_url_full = f"https://image.thum.io/get/width/1500/crop/900/viewport/1500x900/noanimate/{encoded_target}"
     safe_thumb_url = html.escape(thumb_url, quote=True)
     safe_thumb_url_full = html.escape(thumb_url_full, quote=True)
-    components.html(
+    st.iframe(
         f"""
         <div style="width: 100%; font-family: -apple-system, system-ui, sans-serif;">
           <div id="thumb-loading" style="
