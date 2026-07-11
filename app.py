@@ -4,7 +4,6 @@ import pandas as pd
 import math
 import socket
 import requests
-import threading
 import re
 import io
 import hashlib
@@ -124,12 +123,6 @@ def run_scan_cached(user_target, gsb_key=None, urlhaus_key=None, vt_key=None, fo
         pending_ids[cache_key] = new_analysis_id
     else:
         pending_ids.pop(cache_key, None)
-    # FIX (audit): this dict was never capped (unlike scan_cache, which has
-    # _prune_scan_cache) -- a long session scanning many distinct new URLs would grow it
-    # forever. Cap it the same way, dropping the oldest entries first.
-    if len(pending_ids) > SCAN_CACHE_MAX_ENTRIES:
-        for k in list(pending_ids.keys())[: len(pending_ids) - SCAN_CACHE_MAX_ENTRIES]:
-            pending_ids.pop(k, None)
     set_cached_scan(cache_key, result)
     return result, False
 
@@ -148,7 +141,6 @@ def compute_feed_consensus(result):
     return len(clean), len(checked)
 
 def render_screenshot_preview(target_url):
-    from urllib.parse import quote as _urlquote
     """Shows a live visual thumbnail of the destination site so the user can eyeball it
     before clicking through -- uses the free, keyless thum.io screenshot service. Best
     effort only: some sites block screenshot bots, in which case we just skip silently.
@@ -175,12 +167,8 @@ def render_screenshot_preview(target_url):
     # desktop aspect ratio -- without this, thum.io used its own default capture window
     # (narrower/more square), which then got stretched to our target width and looked
     # squeezed/distorted compared to how the site actually renders in a real browser.
-    # FIX: URL-encode the target before embedding it in thum.io's path -- previously
-    # special characters (spaces, #, ?, &) in the target URL could break the thum.io
-    # request. html.escape only protects the HTML attribute context, not the URL itself.
-    encoded_target = _urlquote(target_url, safe='')
-    thumb_url = f"https://image.thum.io/get/width/1500/crop/850/noanimate/{encoded_target}"
-    thumb_url_full = f"https://image.thum.io/get/width/1500/crop/900/viewport/1500x900/noanimate/{encoded_target}"
+    thumb_url = f"https://image.thum.io/get/width/1500/crop/850/noanimate/{target_url}"
+    thumb_url_full = f"https://image.thum.io/get/width/1500/crop/900/viewport/1500x900/noanimate/{target_url}"
     safe_thumb_url = html.escape(thumb_url, quote=True)
     safe_thumb_url_full = html.escape(thumb_url_full, quote=True)
     components.html(
@@ -668,27 +656,6 @@ def check_openphish(original_url, final_url):
 # never seen this URL before, submit it for a fresh analysis and poll briefly for the result.
 import base64
 
-# Global VT rate limiter -- VirusTotal free tier allows only 4 requests/minute.
-# Bulk Scan runs 6 URLs concurrently, so without this a batch of 10+ URLs instantly
-# hits HTTP 429 on most of them. Every thread calls _vt_rate_limit_wait() right before
-# making an actual VT network call, so across ALL threads combined, no more than 4
-# VT requests go out per rolling 60-second window.
-_VT_RATE_LOCK = threading.Lock()
-_VT_CALL_TIMES = []
-VT_MAX_CALLS_PER_MINUTE = 4
-
-def _vt_rate_limit_wait():
-    while True:
-        with _VT_RATE_LOCK:
-            now = __import__("time").time()
-            global _VT_CALL_TIMES
-            _VT_CALL_TIMES = [t for t in _VT_CALL_TIMES if now - t < 60]
-            if len(_VT_CALL_TIMES) < VT_MAX_CALLS_PER_MINUTE:
-                _VT_CALL_TIMES.append(now)
-                return
-            wait_time = 60 - (now - _VT_CALL_TIMES[0]) + 0.5
-        __import__("time").sleep(max(wait_time, 0.1))
-
 def _vt_headers(api_key):
     return {"x-apikey": api_key, "User-Agent": "ThreatX-GlobalGuard/16.0"}
 
@@ -708,7 +675,6 @@ def check_virustotal_url(target_url, api_key, pending_analysis_id=None):
                 "status": "⚪ Skipped — no VirusTotal API key configured"}
     try:
         import time as _time
-        _vt_rate_limit_wait()
 
         analysis_id = pending_analysis_id
         stats = None
@@ -837,7 +803,6 @@ def check_virustotal_file(sha256_hash, api_key):
                 "harmless": 0, "undetected": 0, "total_engines": 0,
                 "status": "⚪ Skipped — no VirusTotal API key configured"}
     try:
-        _vt_rate_limit_wait()
         resp = requests.get(f"https://www.virustotal.com/api/v3/files/{sha256_hash}",
                              headers=_vt_headers(api_key), timeout=10)
         if resp.status_code == 429:
@@ -872,20 +837,6 @@ def check_virustotal_file(sha256_hash, api_key):
                 "harmless": 0, "undetected": 0, "total_engines": 0,
                 "status": "⚪ VirusTotal request failed (network/timeout error)"}
 
-import ipaddress
-
-def _is_unsafe_target_ip(ip_str):
-    """SSRF guard -- True if this IP is private/loopback/link-local/reserved (e.g.
-    127.0.0.1, 10.x.x.x, 192.168.x.x, or 169.254.169.254 which is the cloud metadata
-    endpoint on AWS/GCP/Azure). Prevents the scanner's own server from being tricked
-    into making requests into its own internal network via a malicious 'URL to scan'."""
-    try:
-        ip_obj = ipaddress.ip_address(ip_str)
-        return (ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
-                or ip_obj.is_reserved or ip_obj.is_multicast)
-    except ValueError:
-        return False
-
 # 4. Live DNS Host Resolver + IP Geolocation
 def resolve_live_dns_ip(hostname):
     try:
@@ -919,12 +870,6 @@ def resolve_geolocation(ip_address):
     return None
 
 # 4b. Live Domain Registration Lookup via RDAP
-try:
-    import tldextract
-    _TLDEXTRACT_AVAILABLE = True
-except ImportError:
-    _TLDEXTRACT_AVAILABLE = False
-
 _COMMON_TWO_PART_SUFFIXES = {
     'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'me.uk', 'net.uk',
     'co.in', 'org.in', 'net.in', 'gov.in', 'co.jp', 'co.kr', 'co.nz', 'co.za',
@@ -933,26 +878,15 @@ _COMMON_TWO_PART_SUFFIXES = {
 }
 
 def _base_domain_candidates(hostname):
-    # FIX (accuracy upgrade): the old hardcoded _COMMON_TWO_PART_SUFFIXES set only covered
-    # a handful of ccTLDs -- anything outside it (co.il, com.pl, org.nz, etc.) silently
-    # collapsed to the wrong registrable domain, making WHOIS/CT lookups fail for those
-    # domains. tldextract ships with the full, regularly-updated Public Suffix List, so
-    # it correctly identifies the registrable domain for virtually any TLD structure.
+    # FIX: Strip port first
     hostname = hostname.split(':')[0].lower()
-    candidates = [hostname]
-    if _TLDEXTRACT_AVAILABLE:
-        try:
-            ext = tldextract.extract(hostname)
-            if ext.domain and ext.suffix:
-                registrable = f"{ext.domain}.{ext.suffix}"
-                if registrable != hostname:
-                    candidates.append(registrable)
-                return candidates
-        except Exception:
-            pass
-    # Fallback (tldextract unavailable/failed) -- old heuristic
     parts = hostname.split('.')
+    candidates = [hostname]
     if len(parts) > 2:
+        # FIX: naive "last two labels" broke on multi-part public suffixes like *.co.uk —
+        # e.g. "evil.example.co.uk" collapsed to "example.co.uk" instead of the registrable
+        # "example.co.uk" being correct only when the suffix truly is 2 labels; for a genuine
+        # 3-label host under a 2-label suffix we need the last 3 labels, not 2.
         last_two = '.'.join(parts[-2:])
         if last_two in _COMMON_TWO_PART_SUFFIXES and len(parts) > 3:
             candidates.append('.'.join(parts[-3:]))
@@ -1122,16 +1056,6 @@ def trace_redirect_chain(url, max_hops=10):
     current_url = url
     visited = set()
 
-    # SSRF guard -- if the target hostname resolves to a private/internal IP, refuse to
-    # make the actual HTTP request at all (don't let the server probe its own network).
-    try:
-        _initial_host = urlparse(url).netloc.split(':')[0]
-        _initial_ip = socket.gethostbyname(_initial_host)
-        if _is_unsafe_target_ip(_initial_ip):
-            return [url], url
-    except Exception:
-        pass
-
     try:
         for _ in range(max_hops):
             if current_url in visited:
@@ -1269,10 +1193,6 @@ def check_typosquatting(clean_host):
     all_known_domains = set()
     for domains in OFFICIAL_BRAND_DOMAINS.values():
         all_known_domains.update(domains)
-    # FIX (audit): difflib's similarity ratio is unstable on very short strings -- domains
-    # like "t.me", "t.co", "fb.com", "amzn.to" produced noisy high ratios against unrelated
-    # short hostnames, causing false "typosquat" flags. Drop candidates under 6 chars.
-    all_known_domains = {d for d in all_known_domains if len(d) >= 6}
 
     host_no_www = clean_host[4:] if clean_host.startswith('www.') else clean_host
 
@@ -1315,18 +1235,14 @@ def extract_lexical_vectors(url, domain_drift=False):
     # suspicious wherever they appear. Generic session words are only meaningful when the
     # URL actually drifted to a different domain (genuine cross-domain phishing relay).
     strong_tokens = ['webscr', 'cmd=', 'confirm', 'suspend', 'unlock', 'validate',
-                      'goog1e', 'faceb00k', 'netfliix', 'shekarius', 'allegromt',
+                      'goog1e', 'faceb00k', 'netfliix', 'shekarius', '124', 'allegromt',
                       'credito', 'crediito', 'expertverif', 'sorteoficial', 'contemplado']
     weak_session_tokens = ['login', 'verify', 'verif', 'security', 'secure', 'billing',
                             'update', 'marketplace', 'paypal', 'sbi', 'amazon', 'auth',
                             'portal', 'signin', 'account']
     whitelist = ['google.com', 'github.com', 'wikipedia.org', 'paypal.com',
                  'amazon.com', 'microsoft.com', 'apple.com']
-    # FIX (audit): substring match let an attacker bypass keyword detection just by
-    # embedding a trusted domain anywhere in the hostname, e.g. "google.com.evil-login.tk"
-    # contained "google.com" and got whitelisted. Anchor to exact host or a real subdomain.
-    is_whitelisted = any(clean == wl or clean == f"www.{wl}" or clean.endswith(f".{wl}")
-                          for wl in whitelist)
+    is_whitelisted = any(wl in clean for wl in whitelist)
     # FIX: some tokens (cmd=, webscr, confirm...) only ever appear in the path/query, not the
     # hostname — checking `clean` (hostname only) made those tokens permanently dead. Check the
     # full URL instead, while still only whitelisting on the hostname so a legit domain with a
@@ -1347,17 +1263,10 @@ def extract_lexical_vectors(url, domain_drift=False):
     is_suspicious_tld = tld in PHISHING_TLDS
 
     # 2. Free hosting platform used for phishing
-    # FIX (audit): substring match let an attacker fake "hosted on a trusted platform"
-    # just by prefixing their own domain, e.g. "vercel.app.evil-phish.com" contained
-    # "vercel.app" and silently earned the lower mainstream-platform risk weight below.
-    # Anchor to an exact platform host or a real subdomain of it (matches the endswith
-    # logic already used a few lines down for is_random_platform_subdomain).
-    is_phishing_platform = any(clean == platform or clean.endswith(f".{platform}")
-                                for platform in PHISHING_PLATFORMS)
+    is_phishing_platform = any(platform in clean for platform in PHISHING_PLATFORMS)
     # NEW (v16.0): flag whether the matched platform is a mainstream host with heavy
     # legitimate use (streamlit.app, vercel.app, ...) -- used to soften the lone-signal weight.
-    is_mainstream_platform = any(clean == platform or clean.endswith(f".{platform}")
-                                  for platform in LOW_ABUSE_MAINSTREAM_PLATFORMS)
+    is_mainstream_platform = any(platform in clean for platform in LOW_ABUSE_MAINSTREAM_PLATFORMS)
 
     # 2b. Random/auto-generated subdomain on free hosting platform
     is_random_platform_subdomain = False
@@ -1376,11 +1285,7 @@ def extract_lexical_vectors(url, domain_drift=False):
             is_random_platform_subdomain = has_digit_seq or has_dash_digit or is_long_one_word
 
     # 3. Brand impersonation: brand name in HOSTNAME only (not path — avoids false positives)
-    # FIX (audit): plain substring match false-flagged unrelated legit names that merely
-    # contain a brand word (e.g. "amazonas-tours.com" contains "amazon"). Require the brand
-    # to appear as its own label/segment (bounded by start/end or '.'/'-'), not mid-word.
-    brand_in_host = any(re.search(rf'(?:^|[.\-]){re.escape(brand)}(?:[.\-]|$)', clean)
-                         for brand in IMPERSONATED_BRANDS)
+    brand_in_host = any(brand in clean for brand in IMPERSONATED_BRANDS)
     is_official_brand = False
     if brand_in_host:
         for brand in IMPERSONATED_BRANDS:
