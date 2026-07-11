@@ -179,7 +179,12 @@ def render_screenshot_preview(target_url):
     # FIX: URL-encode the target before embedding it in thum.io's path -- previously
     # special characters (spaces, #, ?, &) in the target URL could break the thum.io
     # request. html.escape only protects the HTML attribute context, not the URL itself.
-    encoded_target = _urlquote(target_url, safe='')
+    # FIX (v2): thum.io expects the scheme/slashes of the target URL to stay literal
+    # (it parses the path by splitting on "/") -- encoding them with safe='' turned
+    # "https://example.com" into "https%3A%2F%2Fexample.com", which thum.io rejects
+    # with a 400 and made every screenshot fail silently. Only encode characters that
+    # would actually break the path (spaces, #, ?, &, etc.), not ":" and "/".
+    encoded_target = _urlquote(target_url, safe='/:')
     thumb_url = f"https://image.thum.io/get/width/1500/crop/850/noanimate/{encoded_target}"
     thumb_url_full = f"https://image.thum.io/get/width/1500/crop/900/viewport/1500x900/noanimate/{encoded_target}"
     safe_thumb_url = html.escape(thumb_url, quote=True)
