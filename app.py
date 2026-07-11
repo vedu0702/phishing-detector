@@ -149,7 +149,6 @@ def compute_feed_consensus(result):
     return len(clean), len(checked)
 
 def render_screenshot_preview(target_url):
-    from urllib.parse import quote as _urlquote
     """Shows a live visual thumbnail of the destination site so the user can eyeball it
     before clicking through -- uses the free, keyless thum.io screenshot service. Best
     effort only: some sites block screenshot bots, in which case we just skip silently.
@@ -171,6 +170,7 @@ def render_screenshot_preview(target_url):
       5) Zeroing body margin -- the browser's default 8px body margin was quietly adding to
          every scrollHeight measurement, so resized heights were always a bit off.
     """
+    from urllib.parse import quote as _urlquote
     st.write("#### \U0001F5BC\uFE0F Live Site Preview (visual check before you click):")
      # FIX v5: added explicit viewport/1600x900 so thum.io captures at a standard widescreen
     # desktop aspect ratio -- without this, thum.io used its own default capture window
